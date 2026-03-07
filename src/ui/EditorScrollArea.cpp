@@ -100,6 +100,10 @@ void EditorScrollArea::keyPressEvent(QKeyEvent *event) {
     event->accept();
 }
 
+QColor EditorScrollArea::highlight_cursor_background() const {
+    return palette().highlight().color().lighter(125);
+}
+
 void EditorScrollArea::paintEvent(QPaintEvent *event) {
     Q_UNUSED(event);
 
@@ -109,6 +113,8 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
     const int line_height_pixels = line_height();
     const int status_height_pixels = status_bar_height();
     const int text_area_height = std::max(viewport()->height() - status_height_pixels, line_height_pixels);
+    // We use the vertical scrollbar as a document-line scroll model. refresh_scrollbars()
+    // sets its range/page step in line units, so value() is the first visible line index.
     const int top_line = verticalScrollBar()->value();
     const int bottom_line_exclusive = std::min(
         top_line + visible_line_count().value,
@@ -132,6 +138,8 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
         if (line_index == cursor_.line.value) {
             const auto [qt_cursor_position, aligned_byte_column] =
                 map_utf8_byte_column_to_qt_cursor(utf8_text, cursor_.column);
+            // We expect a single laid-out line here, but keep the invalid case guarded so an
+            // empty or unexpectedly failed layout cannot crash cursor painting.
             const QTextLine layout_line = layout.lineCount() > 0 ? layout.lineAt(0) : QTextLine();
             const qreal cursor_x = layout_line.isValid()
                 ? layout_line.cursorToX(qt_cursor_position) - horizontal_offset_pixels
@@ -148,15 +156,18 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
                 cursor_width,
                 line_height_pixels);
 
-            painter.fillRect(cursor_rect, palette().highlight().color().lighter(125));
+            painter.fillRect(cursor_rect, highlight_cursor_background());
         }
     }
 
     const QRect status_rect(0, viewport()->height() - status_height_pixels, viewport()->width(), status_height_pixels);
     painter.fillRect(status_rect, palette().alternateBase());
     painter.setPen(palette().windowText().color());
+    // adjusted() gives the text a small left/right inset while keeping the same status bar box.
+    // We could bake that padding into a second QRect, but deriving it from status_rect keeps the
+    // fill rect and text rect tied together.
     painter.drawText(
-        status_rect.adjusted(6, 0, -6, 0),
+        status_rect.adjusted(STATUS_BAR_INSET, 0, -STATUS_BAR_INSET, 0),
         Qt::AlignVCenter | Qt::AlignLeft,
         make_status_bar_text(buffer_, cursor_));
 }
@@ -170,6 +181,8 @@ void EditorScrollArea::resizeEvent(QResizeEvent *event) {
 
 void EditorScrollArea::scrollContentsBy(const int dx, const int dy) {
     QAbstractScrollArea::scrollContentsBy(dx, dy);
+    // The viewport is fully custom-painted from the current scrollbar state, so
+    // scrolling needs to trigger a repaint of the visible document region.
     viewport()->update();
 }
 

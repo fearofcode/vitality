@@ -13,6 +13,7 @@ public:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void scrollContentsBy(int dx, int dy) override;
@@ -24,6 +25,7 @@ private:
     [[nodiscard]] int visible_column_count() const;
     [[nodiscard]] int horizontal_scroll_offset_pixels() const;
     [[nodiscard]] int document_max_line_length() const;
+    [[nodiscard]] QColor highlight_cursor_background() const;
 
     void refresh_scrollbars() const;
     void ensure_cursor_visible() const;
@@ -32,6 +34,7 @@ private:
     TextBuffer buffer_;
     CursorPos cursor_;
     int SYSTEM_FONT_SIZE_PT = 18;
+    int STATUS_BAR_INSET = 6;
 };
 
 }  // namespace vitality
