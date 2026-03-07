@@ -3,16 +3,14 @@
 #include <algorithm>
 #include <limits>
 
-#include <QFontDatabase>
-#include <QKeyEvent>
 #include <QPainter>
-#include <QPaintEvent>
 #include <QPalette>
 #include <QScrollBar>
 #include <QTextLayout>
 
+#include "buffer/BufferTypes.h"
 #include "ui/StatusBarText.h"
-#include "ui/Utf8QtTextBridge.h"
+#include "ui/Utf8QtTextMapper.h"
 
 namespace vitality {
 
@@ -24,10 +22,9 @@ void prepare_layout(QTextLayout &layout) {
     layout.setTextOption(option);
 
     layout.beginLayout();
-    QTextLine line = layout.createLine();
-    if (line.isValid()) {
+    if (QTextLine line = layout.createLine(); line.isValid()) {
         line.setPosition(QPointF(0.0, 0.0));
-        line.setLineWidth(static_cast<qreal>(std::numeric_limits<int>::max() / 4));
+        line.setLineWidth(std::numeric_limits<int>::max() / 4);
     }
     layout.endLayout();
 }
@@ -40,8 +37,7 @@ void prepare_layout(QTextLayout &layout) {
     if (cursor_position < text_length) {
         const qreal current_x = line.cursorToX(cursor_position);
         const qreal next_x = line.cursorToX(cursor_position + 1);
-        const int width = static_cast<int>(std::round(next_x - current_x));
-        if (width > 0) {
+        if (const int width = static_cast<int>(std::round(next_x - current_x)); width > 0) {
             return width;
         }
     }
@@ -55,12 +51,14 @@ EditorScrollArea::EditorScrollArea(TextBuffer buffer, QWidget *parent)
     : QAbstractScrollArea(parent)
     , buffer_(std::move(buffer))
     , cursor_(CursorPos{
-          .line = LineIndex{0},
-          .column = ColumnIndex{0},
+          .line = LineIndex{},
+          .column = ColumnIndex{},
       }) {
     setWindowTitle(QStringLiteral("Vitality"));
     setFocusPolicy(Qt::StrongFocus);
-    setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    auto system_font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    system_font.setPointSize(SYSTEM_FONT_SIZE_PT);
+    setFont(system_font);
 
     refresh_scrollbars();
 }
@@ -125,21 +123,22 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
             break;
         }
 
-        const LineTextView line_text = buffer_.line_text(LineIndex{line_index});
-        const QString line_string = utf8_to_qstring(line_text.utf8_text);
+        const auto [utf8_text] = buffer_.line_text(LineIndex{line_index});
+        const QString line_string = utf8_to_qstring(utf8_text);
         QTextLayout layout(line_string, font());
         prepare_layout(layout);
-        layout.draw(&painter, QPointF(-horizontal_offset_pixels, static_cast<qreal>(y)));
+        layout.draw(&painter, QPointF(-horizontal_offset_pixels, y));
 
         if (line_index == cursor_.line.value) {
-            const QtCursorMapping mapping = map_byte_column_to_qt_cursor(line_text.utf8_text, cursor_.column);
+            const auto [qt_cursor_position, aligned_byte_column] =
+                map_utf8_byte_column_to_qt_cursor(utf8_text, cursor_.column);
             const QTextLine layout_line = layout.lineCount() > 0 ? layout.lineAt(0) : QTextLine();
             const qreal cursor_x = layout_line.isValid()
-                ? layout_line.cursorToX(mapping.qt_cursor_position) - horizontal_offset_pixels
+                ? layout_line.cursorToX(qt_cursor_position) - horizontal_offset_pixels
                 : -horizontal_offset_pixels;
             const int cursor_width = block_cursor_width(
                 layout_line,
-                mapping.qt_cursor_position,
+                qt_cursor_position,
                 line_string.size(),
                 fallback_cursor_width);
 
@@ -153,7 +152,7 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
         }
     }
 
-    QRect status_rect(0, viewport()->height() - status_height_pixels, viewport()->width(), status_height_pixels);
+    const QRect status_rect(0, viewport()->height() - status_height_pixels, viewport()->width(), status_height_pixels);
     painter.fillRect(status_rect, palette().alternateBase());
     painter.setPen(palette().windowText().color());
     painter.drawText(
@@ -207,7 +206,7 @@ int EditorScrollArea::document_max_line_length() const {
     return max_length;
 }
 
-void EditorScrollArea::refresh_scrollbars() {
+void EditorScrollArea::refresh_scrollbars() const {
     const int visible_lines = visible_line_count().value;
     const int total_lines = buffer_.line_count().value;
     verticalScrollBar()->setPageStep(visible_lines);
@@ -219,7 +218,7 @@ void EditorScrollArea::refresh_scrollbars() {
     horizontalScrollBar()->setRange(0, std::max(max_line_length - visible_columns, 0));
 }
 
-void EditorScrollArea::ensure_cursor_visible() {
+void EditorScrollArea::ensure_cursor_visible() const {
     const int visible_lines = visible_line_count().value;
     const int top_line = verticalScrollBar()->value();
     const int bottom_line = top_line + visible_lines - 1;

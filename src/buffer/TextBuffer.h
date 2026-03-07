@@ -3,13 +3,14 @@
 #include <memory>
 #include <string_view>
 
-#include "buffer/LineTextView.h"
 #include "core/CoreTypes.h"
 
 namespace vitality {
 
-struct BufferLoadResult;
 class FilePath;
+struct LineTextView;
+struct BufferLoadResult;
+class TextStorage;
 
 class TextBuffer {
 public:

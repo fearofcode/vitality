@@ -3,7 +3,7 @@
 
 #include <QApplication>
 
-#include "buffer/BufferLoadResult.h"
+#include "buffer/BufferTypes.h"
 #include "buffer/TextBuffer.h"
 #include "file/FilePath.h"
 #include "ui/EditorScrollArea.h"

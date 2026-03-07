@@ -10,7 +10,7 @@
 #include <rapidcheck/gen/Container.h>
 #include <rapidcheck/gen/Text.h>
 
-#include "buffer/BufferLoadResult.h"
+#include "buffer/BufferTypes.h"
 #include "buffer/TextBuffer.h"
 #include "file/FilePath.h"
 

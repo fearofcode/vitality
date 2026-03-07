@@ -1,4 +1,4 @@
-#include "ui/Utf8QtTextBridge.h"
+#include "ui/Utf8QtTextMapper.h"
 
 #include <algorithm>
 
@@ -23,7 +23,9 @@ QString utf8_to_qstring(const std::string_view utf8_text) {
     return QString::fromUtf8(QByteArrayView(utf8_text.data(), static_cast<qsizetype>(utf8_text.size())));
 }
 
-QtCursorMapping map_byte_column_to_qt_cursor(const std::string_view utf8_text, const ColumnIndex byte_column) {
+QtTextCursorMapping map_utf8_byte_column_to_qt_cursor(
+    const std::string_view utf8_text,
+    const ColumnIndex byte_column) {
     int aligned_byte_column = clamp_byte_column(utf8_text, byte_column);
 
     while (aligned_byte_column > 0 &&
@@ -33,9 +35,9 @@ QtCursorMapping map_byte_column_to_qt_cursor(const std::string_view utf8_text, c
     }
 
     const QString prefix = QString::fromUtf8(
-        QByteArrayView(utf8_text.data(), static_cast<qsizetype>(aligned_byte_column)));
+        QByteArrayView(utf8_text.data(), aligned_byte_column));
 
-    return QtCursorMapping{
+    return QtTextCursorMapping{
         .qt_cursor_position = static_cast<int>(prefix.size()),
         .aligned_byte_column = ColumnIndex{aligned_byte_column},
     };

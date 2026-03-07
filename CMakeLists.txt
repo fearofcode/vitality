@@ -13,6 +13,27 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
 include(CTest)
+include(CheckCXXSourceCompiles)
+
+check_cxx_source_compiles(
+    "
+    #include <functional>
+    #include <string>
+
+    int main() {
+        return static_cast<int>(std::hash<std::string>{}(std::string(\"vitality\")));
+    }
+    "
+    VITALITY_CXX_STDLIB_LINKS
+)
+
+if(NOT VITALITY_CXX_STDLIB_LINKS)
+    message(FATAL_ERROR
+        "The selected C++ toolchain cannot link a simple std::hash<std::string> program. "
+        "This usually means the compiler and C++ standard library runtime do not match. "
+        "On macOS, prefer Apple's clang/clang++ in CLion unless you have configured a fully "
+        "consistent Homebrew LLVM + libc++ toolchain.")
+endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
@@ -23,8 +44,9 @@ target_compile_features(vitality_core PUBLIC cxx_std_20)
 target_include_directories(vitality_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 
 add_library(vitality_buffer STATIC
-    src/buffer/BufferLoadResult.h
-    src/buffer/LineTextView.h
+    src/buffer/BufferTypes.h
+    src/buffer/TextStorage.cpp
+    src/buffer/TextStorage.h
     src/buffer/TextBuffer.cpp
     src/buffer/TextBuffer.h
     src/file/FilePath.cpp
@@ -39,8 +61,8 @@ add_library(vitality_ui STATIC
     src/ui/EditorScrollArea.h
     src/ui/StatusBarText.cpp
     src/ui/StatusBarText.h
-    src/ui/Utf8QtTextBridge.cpp
-    src/ui/Utf8QtTextBridge.h
+    src/ui/Utf8QtTextMapper.cpp
+    src/ui/Utf8QtTextMapper.h
 )
 target_compile_features(vitality_ui PUBLIC cxx_std_20)
 target_include_directories(vitality_ui PUBLIC ${PROJECT_SOURCE_DIR}/src)
@@ -80,6 +102,7 @@ if(BUILD_TESTING)
 
     add_executable(vitality_tests
         tests/property/TextBufferPropertyTests.cpp
+        tests/unit/TextStorageTests.cpp
         tests/unit/TextBufferTests.cpp
     )
     target_compile_features(vitality_tests PRIVATE cxx_std_20)

@@ -8,7 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "buffer/BufferLoadResult.h"
+#include "buffer/BufferTypes.h"
 #include "buffer/TextBuffer.h"
 #include "file/FilePath.h"
 

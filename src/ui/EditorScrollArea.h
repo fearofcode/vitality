@@ -25,12 +25,13 @@ private:
     [[nodiscard]] int horizontal_scroll_offset_pixels() const;
     [[nodiscard]] int document_max_line_length() const;
 
-    void refresh_scrollbars();
-    void ensure_cursor_visible();
+    void refresh_scrollbars() const;
+    void ensure_cursor_visible() const;
     void move_cursor(CursorPos cursor);
 
     TextBuffer buffer_;
     CursorPos cursor_;
+    int SYSTEM_FONT_SIZE_PT = 18;
 };
 
 }  // namespace vitality

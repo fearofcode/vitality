@@ -5,7 +5,7 @@
 namespace vitality {
 
 QString make_status_bar_text(const TextBuffer &buffer, const CursorPos cursor) {
-    QString file_label = QStringLiteral("[NO FILE]");
+    auto file_label = QStringLiteral("[NO FILE]");
     if (buffer.has_file_path()) {
         const std::string_view display_name = buffer.display_name();
         file_label = QString::fromUtf8(

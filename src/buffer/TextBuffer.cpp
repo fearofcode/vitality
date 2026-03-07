@@ -5,44 +5,24 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <vector>
 
-#include "buffer/BufferLoadResult.h"
+#include "buffer/BufferTypes.h"
+#include "buffer/TextStorage.h"
 #include "file/FilePath.h"
 
 namespace vitality {
 
 struct TextBuffer::Impl {
-    std::vector<std::string> lines;
+    TextStorage storage;
     std::optional<FilePath> file_path;
     std::string display_name;
+
+    explicit Impl(TextStorage storage_to_use)
+        : storage(std::move(storage_to_use)) {
+    }
 };
 
 namespace {
-
-[[nodiscard]] int clamp_int(const int value, const int minimum, const int maximum) {
-    return std::clamp(value, minimum, maximum);
-}
-
-[[nodiscard]] std::vector<std::string> ensure_non_empty_lines(std::vector<std::string> lines) {
-    if (lines.empty()) {
-        lines.emplace_back();
-    }
-
-    return lines;
-}
-
-[[nodiscard]] CursorPos clamp_cursor_to_lines(const std::vector<std::string> &lines, CursorPos cursor) {
-    const int last_line_index = static_cast<int>(lines.size()) - 1;
-    const int clamped_line = clamp_int(cursor.line.value, 0, last_line_index);
-    const int max_column = static_cast<int>(lines[clamped_line].size());
-    const int clamped_column = clamp_int(cursor.column.value, 0, max_column);
-
-    return CursorPos{
-        .line = LineIndex{clamped_line},
-        .column = ColumnIndex{clamped_column},
-    };
-}
 
 [[nodiscard]] int page_move_delta(const VisibleLineCount visible_lines) {
     return std::max(visible_lines.value - 1, 1);
@@ -51,8 +31,7 @@ namespace {
 }  // namespace
 
 TextBuffer TextBuffer::make_empty() {
-    auto impl = std::make_unique<Impl>();
-    impl->lines.emplace_back();
+    auto impl = std::make_unique<Impl>(TextStorage::make_empty());
     return TextBuffer(std::move(impl));
 }
 
@@ -60,21 +39,12 @@ BufferLoadResult TextBuffer::load_from_path(const FilePath &path) {
     std::ifstream input(path.native_path(), std::ios::in);
     if (!input.is_open()) {
         return BufferLoadResult{
-            .buffer = TextBuffer::make_empty(),
+            .buffer = make_empty(),
             .success = false,
         };
     }
 
-    auto impl = std::make_unique<Impl>();
-    std::string line;
-    while (std::getline(input, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-        impl->lines.push_back(line);
-    }
-
-    impl->lines = ensure_non_empty_lines(std::move(impl->lines));
+    auto impl = std::make_unique<Impl>(TextStorage::load_from_stream(input));
     impl->file_path = path;
     impl->display_name = path.display_name();
 
@@ -95,7 +65,7 @@ TextBuffer &TextBuffer::operator=(TextBuffer &&other) noexcept = default;
 TextBuffer::~TextBuffer() = default;
 
 LineCount TextBuffer::line_count() const {
-    return LineCount{static_cast<int>(impl_->lines.size())};
+    return impl_->storage.line_count();
 }
 
 bool TextBuffer::has_file_path() const {
@@ -107,93 +77,85 @@ std::string_view TextBuffer::display_name() const {
 }
 
 LineTextView TextBuffer::line_text(const LineIndex line) const {
-    if (line.value < 0 || line.value >= static_cast<int>(impl_->lines.size())) {
-        return LineTextView{.utf8_text = std::string_view()};
-    }
-
-    return LineTextView{.utf8_text = impl_->lines[line.value]};
+    return impl_->storage.line_text(line);
 }
 
 ColumnIndex TextBuffer::line_length(const LineIndex line) const {
-    if (line.value < 0 || line.value >= static_cast<int>(impl_->lines.size())) {
-        return ColumnIndex{0};
-    }
-
-    return ColumnIndex{static_cast<int>(impl_->lines[line.value].size())};
+    return impl_->storage.line_length(line);
 }
 
 CursorPos TextBuffer::clamp_cursor(const CursorPos cursor) const {
-    return clamp_cursor_to_lines(impl_->lines, cursor);
+    return impl_->storage.clamp_cursor(cursor);
 }
 
 CursorPos TextBuffer::move_left(const CursorPos cursor) const {
-    const CursorPos clamped = clamp_cursor(cursor);
+    const auto [line, column] = clamp_cursor(cursor);
     return CursorPos{
-        .line = clamped.line,
-        .column = ColumnIndex{std::max(clamped.column.value - 1, 0)},
+        .line = line,
+        .column = ColumnIndex{std::max(column.value - 1, 0)},
     };
 }
 
 CursorPos TextBuffer::move_right(const CursorPos cursor) const {
-    const CursorPos clamped = clamp_cursor(cursor);
-    const int max_column = line_length(clamped.line).value;
+    const auto [line, column] = clamp_cursor(cursor);
+    const int max_column = line_length(line).value;
     return CursorPos{
-        .line = clamped.line,
-        .column = ColumnIndex{std::min(clamped.column.value + 1, max_column)},
+        .line = line,
+        .column = ColumnIndex{std::min(column.value + 1, max_column)},
     };
 }
 
 CursorPos TextBuffer::move_up(const CursorPos cursor) const {
-    const CursorPos clamped = clamp_cursor(cursor);
-    const int target_line = std::max(clamped.line.value - 1, 0);
+    const auto [line, column] = clamp_cursor(cursor);
+    const int target_line = std::max(line.value - 1, 0);
     return clamp_cursor(CursorPos{
         .line = LineIndex{target_line},
-        .column = clamped.column,
+        .column = column,
     });
 }
 
 CursorPos TextBuffer::move_down(const CursorPos cursor) const {
-    const CursorPos clamped = clamp_cursor(cursor);
+    const auto [line, column] = clamp_cursor(cursor);
     const int last_line = line_count().value - 1;
-    const int target_line = std::min(clamped.line.value + 1, last_line);
+    const int target_line = std::min(line.value + 1, last_line);
     return clamp_cursor(CursorPos{
         .line = LineIndex{target_line},
-        .column = clamped.column,
+        .column = column,
     });
 }
 
 CursorPos TextBuffer::move_page_up(const CursorPos cursor, const VisibleLineCount visible_lines) const {
-    const CursorPos clamped = clamp_cursor(cursor);
-    const int target_line = std::max(clamped.line.value - page_move_delta(visible_lines), 0);
+    const auto [line, column] = clamp_cursor(cursor);
+    const int target_line = std::max(line.value - page_move_delta(visible_lines), 0);
     return clamp_cursor(CursorPos{
         .line = LineIndex{target_line},
-        .column = clamped.column,
+        .column = column,
     });
 }
 
 CursorPos TextBuffer::move_page_down(const CursorPos cursor, const VisibleLineCount visible_lines) const {
-    const CursorPos clamped = clamp_cursor(cursor);
+    const auto [line, column] = clamp_cursor(cursor);
     const int last_line = line_count().value - 1;
-    const int target_line = std::min(clamped.line.value + page_move_delta(visible_lines), last_line);
+    const int target_line = std::min(line.value + page_move_delta(visible_lines), last_line);
     return clamp_cursor(CursorPos{
         .line = LineIndex{target_line},
-        .column = clamped.column,
+        .column = column,
     });
 }
 
 CursorPos TextBuffer::move_home(const CursorPos cursor) const {
-    const CursorPos clamped = clamp_cursor(cursor);
+    const auto [line, column] = clamp_cursor(cursor);
     return CursorPos{
-        .line = clamped.line,
-        .column = ColumnIndex{0},
+        .line = line,
+        .column = ColumnIndex{},
     };
 }
 
 CursorPos TextBuffer::move_end(const CursorPos cursor) const {
-    const CursorPos clamped = clamp_cursor(cursor);
+    const auto [line, column] = clamp_cursor(cursor);
     return CursorPos{
-        .line = clamped.line,
-        .column = line_length(clamped.line),
+        .line = line,
+        .column = line_length(line),
     };
 }
 
