@@ -1,0 +1,15 @@
+.DS_Store
+
+# CMake and local build outputs
+/build/
+/cmake-build-debug/
+/cmake-build-release/
+
+# JetBrains IDE files
+/.idea/
+*.iml
+
+# Editor temp files
+*.swp
+*.swo
+*~
