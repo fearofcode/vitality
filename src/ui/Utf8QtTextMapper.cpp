@@ -11,8 +11,9 @@ namespace {
 }
 
 [[nodiscard]] int clamp_byte_column(std::string_view utf8_text, const ByteColumn byte_column) {
-    const int max_column = static_cast<int>(utf8_text.size());
-    return std::clamp(byte_column.value, 0, max_column);
+    const auto max_column = static_cast<std::int64_t>(utf8_text.size());
+    const auto clamped = std::clamp<std::int64_t>(byte_column.value, 0, max_column);
+    return static_cast<int>(clamped);
 }
 
 }  // namespace

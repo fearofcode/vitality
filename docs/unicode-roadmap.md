@@ -4,10 +4,13 @@ This document lays out a staged path from the current byte-based prototype to gr
 
 Current focus:
 
-- Stage 1.5 — editable `TextStorage` on the treap core.
-- Stage 1.6 — recover storage-local performance where the new editable core regressed relative to the earlier treap prototype.
-- Stage 1.7 — add bounded storage maintenance so long edit sessions can reclaim mergeable piece fragmentation without pulling editor caches into storage.
-- Stage 2 — minimal byte-type split for cursor and offset semantics.
+- Completed:
+  - Stage 1.5 — editable `TextStorage` on the treap core.
+  - Stage 1.6 — storage-local edit-path performance recovery relative to the earlier treap prototype.
+  - Stage 1.7 — bounded storage maintenance for long edit sessions without reintroducing editor/query caches into storage.
+  - Stage 1.8 — recent contiguous edit fast paths plus typing-oriented benchmark coverage for in-document typing workloads.
+- Current focus:
+  - Stage 2 — minimal byte-type split for cursor and offset semantics.
 
 The current state is intentionally limited:
 
@@ -168,6 +171,19 @@ Exit criteria:
 - Storage can periodically compact mergeable piece fragmentation without public API changes.
 - Maintenance remains internal to storage and does not reintroduce editor/query caches into the treap layer.
 - Release benchmarks remain acceptable after the maintenance heuristics are added.
+
+Status:
+
+- Completed.
+- The current implementation has:
+  - bounded compaction inside the treap-backed storage core
+  - conservative maintenance triggering after real mutations
+  - regression tests covering maintenance invariants
+- This stage intentionally does not include:
+  - line finger caches
+  - decoded line caches
+  - grapheme or visual-column caches
+- Those remain deferred to later document/query or Unicode-aware layers.
 
 ## Stage 3: Introduce a dedicated Unicode module
 

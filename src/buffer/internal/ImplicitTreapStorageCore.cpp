@@ -55,6 +55,12 @@ void append_piece_range(
     return !bytes.empty() && bytes.back() == static_cast<std::uint8_t>('\n');
 }
 
+void trim_piece_newline_offsets_to_length(std::vector<std::size_t> &newline_offsets, const std::size_t new_length) {
+    while (!newline_offsets.empty() && newline_offsets.back() >= new_length) {
+        newline_offsets.pop_back();
+    }
+}
+
 }  // namespace
 
 PrioritySource::PrioritySource(const std::uint64_t seed)
@@ -161,9 +167,15 @@ void ImplicitTreapStorageCore::pull(Node *const node) {
     node->subtree_newlines = node_newlines(node->left) + node->piece_newlines + node_newlines(node->right);
 }
 
+// Optimization helper: grow one existing add-backed piece in place after new
+// bytes were appended to storage_.add. This keeps typing and append-style edits
+// from creating a fresh node for every byte.
 void ImplicitTreapStorageCore::extend_tail_node_with_inserted_suffix(Node *const tail, const std::string_view inserted_text) {
     assert(tail);
 
+    // "Tail" here means the piece node we already know should absorb the new
+    // bytes. This helper performs the cheap in-place update: grow the piece
+    // length and append newline offsets only for the newly inserted suffix.
     const std::size_t old_length = tail->piece.length;
     tail->piece.length += inserted_text.size();
     for (std::size_t index = 0; index < inserted_text.size(); ++index) {
@@ -200,6 +212,9 @@ std::pair<Piece, Piece> ImplicitTreapStorageCore::split_piece_at(
     const std::size_t local_offset) {
     assert(local_offset < piece.length);
 
+    // Splitting a piece does not copy bytes. Both resulting descriptors still
+    // point into the same backing buffer; they just cover disjoint subranges of
+    // the original span.
     Piece left = piece;
     Piece right = piece;
 
@@ -217,6 +232,9 @@ bool ImplicitTreapStorageCore::can_coalesce_pieces(const Piece &left, const Piec
     if (left.buffer != right.buffer) {
         return false;
     }
+    // Two pieces are mergeable only when they refer to adjacent byte ranges in
+    // the same backing store. If there is any gap, overlap, or buffer change,
+    // merging would change the represented text.
     return left.start + left.length == right.start;
 }
 
@@ -229,6 +247,9 @@ Piece ImplicitTreapStorageCore::coalesce_pieces(const Piece &left, const Piece &
     };
 }
 
+// Optimization helper: detach exactly the first in-document node from a tree so
+// boundary-aware join logic can inspect or rewrite that one piece without
+// flattening the whole subtree.
 std::pair<std::unique_ptr<ImplicitTreapStorageCore::Node>, std::unique_ptr<ImplicitTreapStorageCore::Node>>
 ImplicitTreapStorageCore::detach_leftmost(std::unique_ptr<Node> root) {
     if (!root) {
@@ -236,18 +257,25 @@ ImplicitTreapStorageCore::detach_leftmost(std::unique_ptr<Node> root) {
     }
 
     if (!root->left) {
+        // This node is already the first in document order. Return it and keep
+        // its right subtree as the remaining tree.
         auto rest = std::move(root->right);
         root->right.reset();
         pull(root.get());
         return {std::move(root), std::move(rest)};
     }
 
+    // Recurse down the left spine until we find the first in-order node, then
+    // rebuild metadata on the way back up.
     auto [leftmost, new_left] = detach_leftmost(std::move(root->left));
     root->left = std::move(new_left);
     pull(root.get());
     return {std::move(leftmost), std::move(root)};
 }
 
+// Optimization helper: detach exactly the last in-document node from a tree so
+// fast insert/erase paths can mutate the boundary piece that touches a split
+// point, then stitch the remaining tree back together.
 std::pair<std::unique_ptr<ImplicitTreapStorageCore::Node>, std::unique_ptr<ImplicitTreapStorageCore::Node>>
 ImplicitTreapStorageCore::detach_rightmost(std::unique_ptr<Node> root) {
     if (!root) {
@@ -255,18 +283,25 @@ ImplicitTreapStorageCore::detach_rightmost(std::unique_ptr<Node> root) {
     }
 
     if (!root->right) {
+        // This node is already the last in document order. Return it and keep
+        // its left subtree as the remaining tree.
         auto rest = std::move(root->left);
         root->left.reset();
         pull(root.get());
         return {std::move(root), std::move(rest)};
     }
 
+    // Recurse down the right spine until we find the last in-order node, then
+    // rebuild metadata on the way back up.
     auto [rightmost, new_right] = detach_rightmost(std::move(root->right));
     root->right = std::move(new_right);
     pull(root.get());
     return {std::move(rightmost), std::move(root)};
 }
 
+// Optimization helper: join adjacent document subtrees while opportunistically
+// collapsing only the single boundary pair that could have become mergeable.
+// This avoids a separate post-hoc coalescing pass after common mutations.
 std::unique_ptr<ImplicitTreapStorageCore::Node> ImplicitTreapStorageCore::join_with_boundary_coalescing(
     std::unique_ptr<Node> left,
     std::unique_ptr<Node> right) {
@@ -277,14 +312,25 @@ std::unique_ptr<ImplicitTreapStorageCore::Node> ImplicitTreapStorageCore::join_w
         return left;
     }
 
+    // Only the document boundary between the two trees can create a new
+    // merge opportunity. Internal boundaries inside each tree were already
+    // valid before this join, so we inspect the rightmost piece from the left
+    // tree and the leftmost piece from the right tree.
     const Node *left_tail_view = rightmost_node(left);
     const Node *right_head_view = leftmost_node(right);
     assert(left_tail_view);
     assert(right_head_view);
+
+    // Most joins do not actually create mergeable neighbors. In that common
+    // case, avoid detaching and rebuilding boundary nodes and just perform the
+    // ordinary treap merge.
     if (!can_coalesce_pieces(left_tail_view->piece, right_head_view->piece)) {
         return merge(std::move(left), std::move(right));
     }
 
+    // If the boundary pieces are contiguous in the same backing buffer, detach
+    // just those two edge nodes, replace them with one combined piece, then
+    // stitch the trees back together.
     auto [left_tail, left_rest] = detach_rightmost(std::move(left));
     auto [right_head, right_rest] = detach_leftmost(std::move(right));
     assert(left_tail);
@@ -296,6 +342,146 @@ std::unique_ptr<ImplicitTreapStorageCore::Node> ImplicitTreapStorageCore::join_w
         std::max(left_tail->priority, right_head->priority));
     auto joined_left = merge(std::move(left_rest), std::move(merged_node));
     return merge(std::move(joined_left), std::move(right_rest));
+}
+
+// Optimization helper: drop the recent typing tracker whenever a mutation path
+// can no longer prove which add-backed piece represents the current typing run.
+void ImplicitTreapStorageCore::clear_recent_contiguous_edit() {
+    recent_contiguous_edit_ = RecentContiguousEdit{};
+}
+
+// Optimization helper: remember one exact add-backed piece as the current
+// contiguous typing run so the next insert/backspace can try a narrower fast
+// path instead of the generic split/join mutation path.
+void ImplicitTreapStorageCore::record_recent_add_piece(
+    const std::size_t piece_doc_start,
+    const std::size_t piece_add_start,
+    const std::size_t piece_length,
+    const std::size_t typed_suffix_length) {
+    recent_contiguous_edit_ = RecentContiguousEdit{
+        .active = true,
+        .piece_doc_start = piece_doc_start,
+        .piece_add_start = piece_add_start,
+        .piece_length = piece_length,
+        .typed_suffix_length = typed_suffix_length,
+    };
+}
+
+// Optimization helper: fast path for "type another byte right where the last
+// typing run ended". It isolates the tracked add-backed piece, grows it in
+// place, and avoids creating a brand-new node for each keystroke.
+bool ImplicitTreapStorageCore::try_extend_recent_contiguous_insert(
+    const ByteOffset offset,
+    const std::string_view utf8_text) {
+    if (!recent_contiguous_edit_.active || utf8_text.empty() || offset.value < 0) {
+        return false;
+    }
+
+    const std::size_t byte_offset = static_cast<std::size_t>(offset.value);
+    if (byte_offset != recent_contiguous_edit_.piece_doc_start + recent_contiguous_edit_.piece_length) {
+        return false;
+    }
+    if (recent_contiguous_edit_.piece_add_start + recent_contiguous_edit_.piece_length != storage_.add.size()) {
+        return false;
+    }
+
+    // The new bytes must be appended to storage_.add before we can extend the
+    // tracked piece, because a piece-table piece is defined as a span into one
+    // of the backing buffers. Extending the piece means increasing its length
+    // so it covers bytes that already exist in the add buffer.
+    storage_.add.insert(storage_.add.end(), utf8_text.begin(), utf8_text.end());
+
+    // Even on the fast path we still split the tree: the tracked add-backed
+    // piece may sit in the middle of the document, so we need to isolate the
+    // exact node that ends at this insertion point before we can safely mutate
+    // it in place.
+    auto [left_tree, right_tree] = split_by_offset(std::move(root_), byte_offset);
+    auto [left_tail, left_rest] = detach_rightmost(std::move(left_tree));
+    if (!left_tail ||
+        left_tail->piece.buffer != BufferKind::Add ||
+        left_tail->piece.start != recent_contiguous_edit_.piece_add_start ||
+        left_tail->piece.length != recent_contiguous_edit_.piece_length) {
+        // The tracker was stale or ambiguous. Rebuild the original tree shape
+        // and fall back to the generic insertion path rather than guessing.
+        auto rebuilt_left = merge(std::move(left_rest), std::move(left_tail));
+        root_ = merge(std::move(rebuilt_left), std::move(right_tree));
+        clear_recent_contiguous_edit();
+        return false;
+    }
+
+    extend_tail_node_with_inserted_suffix(left_tail.get(), utf8_text);
+    pull(left_tail.get());
+
+    recent_contiguous_edit_.piece_length += utf8_text.size();
+    recent_contiguous_edit_.typed_suffix_length += utf8_text.size();
+
+    // We rejoin through boundary-aware coalescing so that, if the extended add
+    // piece now touches a compatible neighbor on the right, we preserve the
+    // normal piece-collapsing invariants instead of leaving an avoidable split.
+    auto rebuilt_left = merge(std::move(left_rest), std::move(left_tail));
+    root_ = join_with_boundary_coalescing(std::move(rebuilt_left), std::move(right_tree));
+    return true;
+}
+
+// Optimization helper: fast path for immediate backspace over recently typed
+// bytes. It shrinks only the tracked suffix of the current add-backed piece and
+// falls back immediately if the erase is not exactly that local case.
+bool ImplicitTreapStorageCore::try_erase_recent_typed_suffix(const ByteRange range) {
+    if (!recent_contiguous_edit_.active || range.start.value < 0 || range.length.value <= 0) {
+        return false;
+    }
+
+    const std::size_t start = static_cast<std::size_t>(range.start.value);
+    const std::size_t length = static_cast<std::size_t>(range.length.value);
+    const std::size_t piece_end = recent_contiguous_edit_.piece_doc_start + recent_contiguous_edit_.piece_length;
+    const std::size_t typed_suffix_start = piece_end - recent_contiguous_edit_.typed_suffix_length;
+    if (start + length != piece_end || start < typed_suffix_start) {
+        return false;
+    }
+
+    // Immediate backspace only needs to touch the tracked add-backed piece, but
+    // that piece can still live inside the middle of the document. Split at the
+    // known end position so the tracked node becomes the rightmost node of the
+    // left tree, then detach just that node for in-place shrinking.
+    auto [left_tree, right_tree] = split_by_offset(std::move(root_), piece_end);
+    auto [left_tail, left_rest] = detach_rightmost(std::move(left_tree));
+    if (!left_tail ||
+        left_tail->piece.buffer != BufferKind::Add ||
+        left_tail->piece.start != recent_contiguous_edit_.piece_add_start ||
+        left_tail->piece.length != recent_contiguous_edit_.piece_length) {
+        // The tracker no longer describes the actual boundary piece. Put the
+        // tree back together and let the generic erase path handle it.
+        auto rebuilt_left = merge(std::move(left_rest), std::move(left_tail));
+        root_ = merge(std::move(rebuilt_left), std::move(right_tree));
+        clear_recent_contiguous_edit();
+        return false;
+    }
+
+    const std::size_t new_length = left_tail->piece.length - length;
+    if (new_length == 0) {
+        // If backspace removes the entire tracked add piece, the left and right
+        // sides may become directly mergeable again, so use the same boundary
+        // coalescing join as the generic erase path.
+        recent_contiguous_edit_.piece_length = 0;
+        recent_contiguous_edit_.typed_suffix_length -= length;
+        clear_recent_contiguous_edit();
+        root_ = join_with_boundary_coalescing(std::move(left_rest), std::move(right_tree));
+        return true;
+    }
+
+    left_tail->piece.length = new_length;
+    trim_piece_newline_offsets_to_length(left_tail->newline_offsets, new_length);
+    left_tail->piece_newlines = left_tail->newline_offsets.size();
+    pull(left_tail.get());
+
+    recent_contiguous_edit_.piece_length = new_length;
+    recent_contiguous_edit_.typed_suffix_length -= length;
+
+    // Shrinking the tracked node keeps the fast path local: we only rebuild the
+    // minimal path needed to put that one node back into the treap.
+    auto rebuilt_left = merge(std::move(left_rest), std::move(left_tail));
+    root_ = join_with_boundary_coalescing(std::move(rebuilt_left), std::move(right_tree));
+    return true;
 }
 
 std::pair<std::unique_ptr<ImplicitTreapStorageCore::Node>, std::unique_ptr<ImplicitTreapStorageCore::Node>>
@@ -399,6 +585,12 @@ void ImplicitTreapStorageCore::insert(const ByteOffset offset, const std::string
         return;
     }
 
+    if (try_extend_recent_contiguous_insert(offset, utf8_text)) {
+        return;
+    }
+
+    clear_recent_contiguous_edit();
+
     const std::size_t byte_offset = static_cast<std::size_t>(offset.value);
     const bool append_at_end = byte_offset == byte_count();
     const std::size_t add_start = storage_.add.size();
@@ -413,20 +605,50 @@ void ImplicitTreapStorageCore::insert(const ByteOffset offset, const std::string
     if (append_at_end) {
         auto [tail, rest] = detach_rightmost(std::move(root_));
         if (tail && can_coalesce_pieces(tail->piece, piece)) {
+            const std::size_t existing_length = tail->piece.length;
             extend_tail_node_with_inserted_suffix(tail.get(), utf8_text);
             pull(tail.get());
             root_ = merge(std::move(rest), std::move(tail));
+            record_recent_add_piece(
+                byte_offset - existing_length,
+                add_start - existing_length,
+                existing_length + utf8_text.size(),
+                utf8_text.size());
             return;
         }
 
         auto left_tree = merge(std::move(rest), std::move(tail));
         root_ = merge(std::move(left_tree), make_node(piece));
+        record_recent_add_piece(byte_offset, add_start, utf8_text.size(), utf8_text.size());
         return;
     }
 
     auto [left_tree, right_tree] = split_by_offset(std::move(root_), byte_offset);
+    const Node *left_tail_view = rightmost_node(left_tree);
+    const Node *right_head_view = leftmost_node(right_tree);
+    // We record whether the newly inserted add-backed piece will merge with an
+    // existing neighbor so we can decide whether the recent-edit tracker can be
+    // re-established exactly after the generic insertion finishes.
+    const bool coalesces_left = left_tail_view && can_coalesce_pieces(left_tail_view->piece, piece);
+    const bool coalesces_right = right_head_view && can_coalesce_pieces(piece, right_head_view->piece);
     auto with_insert = join_with_boundary_coalescing(std::move(left_tree), make_node(piece));
     root_ = join_with_boundary_coalescing(std::move(with_insert), std::move(right_tree));
+
+    if (coalesces_left && !coalesces_right) {
+        record_recent_add_piece(
+            byte_offset - left_tail_view->piece.length,
+            left_tail_view->piece.start,
+            left_tail_view->piece.length + utf8_text.size(),
+            utf8_text.size());
+    } else if (!coalesces_left && !coalesces_right) {
+        record_recent_add_piece(byte_offset, add_start, utf8_text.size(), utf8_text.size());
+    } else {
+        // If the inserted piece merged on the right, or on both sides, the
+        // resulting piece identity is no longer cheap to reconstruct from the
+        // pre-join boundary views. Prefer dropping the tracker to recording the
+        // wrong piece and corrupting later fast-path edits.
+        clear_recent_contiguous_edit();
+    }
 }
 
 void ImplicitTreapStorageCore::erase(const ByteRange range) {
@@ -435,6 +657,12 @@ void ImplicitTreapStorageCore::erase(const ByteRange range) {
     if (range.length.value == 0 || range.start.value == byte_count()) {
         return;
     }
+
+    if (try_erase_recent_typed_suffix(range)) {
+        return;
+    }
+
+    clear_recent_contiguous_edit();
 
     const std::size_t start = static_cast<std::size_t>(range.start.value);
     const std::size_t length = static_cast<std::size_t>(range.length.value);
@@ -598,6 +826,7 @@ std::size_t ImplicitTreapStorageCore::compact_with_merge_budget(const std::size_
 
     if (merges > 0) {
         rebuild_from_piece_sequence(compacted);
+        clear_recent_contiguous_edit();
     }
     return merges;
 }

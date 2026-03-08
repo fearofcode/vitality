@@ -31,6 +31,8 @@ This project should lean toward domain-driven design. Model important concepts a
 - Do not let `ui` reach into buffer internals or depend on storage details.
 - Prefer concrete types with narrow public headers for editor internals that are performance-sensitive.
 - Use virtual interfaces selectively at system boundaries such as platform integration, persistence backends, or other seams that are genuinely useful to substitute.
+- Qt widget and painting APIs are often `int`-shaped. Do not let those UI/API limits force 32-bit coordinate, offset, line-count, or file-size limits back into `core`, `buffer`, or storage-facing domain types.
+- When a Qt boundary needs `int`, clamp or map explicitly at the UI edge. Keep core/storage semantics large-file-friendly even if the current widget layer still needs a narrower representation.
 
 ## Domain modeling
 

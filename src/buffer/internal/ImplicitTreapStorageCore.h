@@ -77,9 +77,29 @@ private:
         std::size_t newlines = 0;
     };
 
+    struct RecentContiguousEdit {
+        // Tracks a single add-backed piece that represents the user's current
+        // "typing run". This is intentionally narrow: if we cannot prove that
+        // later edits still refer to this exact piece, we invalidate the
+        // tracker and fall back to the generic treap mutation path.
+        bool active = false;
+        // Document byte offset where the tracked piece begins.
+        std::size_t piece_doc_start = 0;
+        // Offset into storage_.add where the tracked piece begins.
+        std::size_t piece_add_start = 0;
+        // Current full length of the tracked piece in document/add-buffer
+        // bytes.
+        std::size_t piece_length = 0;
+        // Suffix of the tracked piece that belongs to the most recent
+        // contiguous typing run. Immediate backspace is only allowed to trim
+        // bytes from this suffix.
+        std::size_t typed_suffix_length = 0;
+    };
+
     PieceStorage storage_;
     std::unique_ptr<Node> root_;
     PrioritySource priorities_;
+    RecentContiguousEdit recent_contiguous_edit_;
 
     [[nodiscard]] static std::size_t node_bytes(const std::unique_ptr<Node> &node);
     [[nodiscard]] static std::size_t node_newlines(const std::unique_ptr<Node> &node);
@@ -106,13 +126,40 @@ private:
     [[nodiscard]] static std::pair<Piece, Piece> split_piece_at(const Piece &piece, std::size_t local_offset);
     [[nodiscard]] static bool can_coalesce_pieces(const Piece &left, const Piece &right);
     [[nodiscard]] static Piece coalesce_pieces(const Piece &left, const Piece &right);
+    // Remove and return the first in-document node from a subtree along with
+    // the remaining tree. We use this when a join only needs to inspect or
+    // rewrite the boundary node instead of traversing the whole subtree.
     [[nodiscard]] std::pair<std::unique_ptr<Node>, std::unique_ptr<Node>> detach_leftmost(
         std::unique_ptr<Node> root);
+    // Remove and return the last in-document node from a subtree along with
+    // the remaining tree. This is the symmetric helper used when a mutation
+    // needs direct access to the piece that ends at a split boundary.
     [[nodiscard]] std::pair<std::unique_ptr<Node>, std::unique_ptr<Node>> detach_rightmost(
         std::unique_ptr<Node> root);
+    // Join two trees that already represent adjacent document ranges. Most of
+    // the time this is just an ordinary treap merge, but if the boundary pieces
+    // refer to adjacent spans in the same backing store we collapse them into a
+    // single piece while stitching the trees together.
     [[nodiscard]] std::unique_ptr<Node> join_with_boundary_coalescing(
         std::unique_ptr<Node> left,
         std::unique_ptr<Node> right);
+    void clear_recent_contiguous_edit();
+    void record_recent_add_piece(
+        std::size_t piece_doc_start,
+        std::size_t piece_add_start,
+        std::size_t piece_length,
+        std::size_t typed_suffix_length);
+    // Fast path for "type another byte at the same place". We still have to
+    // touch the treap because the tracked piece can live inside the middle of
+    // the document, so we must isolate that exact node before extending it.
+    [[nodiscard]] bool try_extend_recent_contiguous_insert(ByteOffset offset, std::string_view utf8_text);
+    // Fast path for immediate backspace over recently typed bytes. This is
+    // intentionally narrower than generic erase: it only trims the suffix that
+    // we know belongs to the current typing run.
+    [[nodiscard]] bool try_erase_recent_typed_suffix(ByteRange range);
+    // Extend one existing add-backed piece with newly appended bytes instead of
+    // creating a fresh node. Newline offsets are updated incrementally so we do
+    // not have to rescan the whole piece payload after each typed byte.
     void extend_tail_node_with_inserted_suffix(Node *tail, std::string_view inserted_text);
     void collect_pieces_in_order(const Node *node, std::vector<Piece> &out) const;
     void rebuild_from_piece_sequence(const std::vector<Piece> &pieces);

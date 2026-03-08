@@ -1,6 +1,7 @@
 #include "buffer/TextBuffer.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -25,8 +26,8 @@ struct TextBuffer::Impl {
 
 namespace {
 
-[[nodiscard]] int page_move_delta(const VisibleLineCount visible_lines) {
-    return std::max(visible_lines.value - 1, 1);
+[[nodiscard]] std::int64_t page_move_delta(const VisibleLineCount visible_lines) {
+    return std::max<std::int64_t>(visible_lines.value - 1, 1);
 }
 
 [[nodiscard]] std::string read_stream_bytes(std::istream &input) {
@@ -115,22 +116,22 @@ ByteCursorPos TextBuffer::move_left(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
     return ByteCursorPos{
         .line = line,
-        .column = ByteColumn{std::max(column.value - 1, 0)},
+        .column = ByteColumn{std::max<std::int64_t>(column.value - 1, 0)},
     };
 }
 
 ByteCursorPos TextBuffer::move_right(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
-    const int max_column = line_length(line).value;
+    const std::int64_t max_column = line_length(line).value;
     return ByteCursorPos{
         .line = line,
-        .column = ByteColumn{std::min(column.value + 1, max_column)},
+        .column = ByteColumn{std::min<std::int64_t>(column.value + 1, max_column)},
     };
 }
 
 ByteCursorPos TextBuffer::move_up(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
-    const int target_line = std::max(line.value - 1, 0);
+    const std::int64_t target_line = std::max<std::int64_t>(line.value - 1, 0);
     return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,
@@ -139,8 +140,8 @@ ByteCursorPos TextBuffer::move_up(const ByteCursorPos cursor) const {
 
 ByteCursorPos TextBuffer::move_down(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
-    const int last_line = line_count().value - 1;
-    const int target_line = std::min(line.value + 1, last_line);
+    const std::int64_t last_line = line_count().value - 1;
+    const std::int64_t target_line = std::min<std::int64_t>(line.value + 1, last_line);
     return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,
@@ -149,7 +150,7 @@ ByteCursorPos TextBuffer::move_down(const ByteCursorPos cursor) const {
 
 ByteCursorPos TextBuffer::move_page_up(const ByteCursorPos cursor, const VisibleLineCount visible_lines) const {
     const auto [line, column] = clamp_cursor(cursor);
-    const int target_line = std::max(line.value - page_move_delta(visible_lines), 0);
+    const std::int64_t target_line = std::max<std::int64_t>(line.value - page_move_delta(visible_lines), 0);
     return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,
@@ -158,8 +159,8 @@ ByteCursorPos TextBuffer::move_page_up(const ByteCursorPos cursor, const Visible
 
 ByteCursorPos TextBuffer::move_page_down(const ByteCursorPos cursor, const VisibleLineCount visible_lines) const {
     const auto [line, column] = clamp_cursor(cursor);
-    const int last_line = line_count().value - 1;
-    const int target_line = std::min(line.value + page_move_delta(visible_lines), last_line);
+    const std::int64_t last_line = line_count().value - 1;
+    const std::int64_t target_line = std::min<std::int64_t>(line.value + page_move_delta(visible_lines), last_line);
     return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,

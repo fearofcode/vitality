@@ -1,9 +1,63 @@
+#include <cstdint>
 #include <sstream>
 #include <string_view>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "buffer/TextStorage.h"
+
+namespace {
+
+enum class TypingOpKind : std::uint8_t {
+    InsertByte,
+    Backspace,
+};
+
+struct TypingOp {
+    TypingOpKind kind = TypingOpKind::InsertByte;
+    char byte = '\0';
+};
+
+[[nodiscard]] std::vector<TypingOp> shortened_typing_script(
+    const std::string_view fragment,
+    const int repetitions,
+    const std::string_view replacements,
+    const int correction_interval) {
+    std::vector<TypingOp> ops;
+    int inserted_since_correction = 0;
+
+    for (int repetition = 0; repetition < repetitions; ++repetition) {
+        for (const char byte : fragment) {
+            ops.push_back(TypingOp{
+                .kind = TypingOpKind::InsertByte,
+                .byte = byte,
+            });
+            ++inserted_since_correction;
+
+            if (inserted_since_correction < correction_interval) {
+                continue;
+            }
+
+            inserted_since_correction = 0;
+            for (int index = 0; index < static_cast<int>(replacements.size()); ++index) {
+                ops.push_back(TypingOp{
+                    .kind = TypingOpKind::Backspace,
+                });
+            }
+            for (const char replacement : replacements) {
+                ops.push_back(TypingOp{
+                    .kind = TypingOpKind::InsertByte,
+                    .byte = replacement,
+                });
+            }
+        }
+    }
+
+    return ops;
+}
+
+}  // namespace
 
 TEST_CASE("TextStorage make_empty creates one empty line") {
     const vitality::TextStorage storage = vitality::TextStorage::make_empty();
@@ -139,12 +193,77 @@ TEST_CASE("TextStorage maintenance pass preserves text and invariants during man
     vitality::TextStorage storage = vitality::TextStorage::from_utf8(input);
 
     for (int index = 0; index < 2304; ++index) {
-        const int offset = storage.byte_count().value / 2;
+        const std::int64_t offset = storage.byte_count().value / 2;
         const auto inserted = storage.insert(vitality::ByteOffset{offset}, "x");
         REQUIRE(inserted.success);
         input.insert(static_cast<std::size_t>(offset), "x");
     }
 
     CHECK(storage.text() == input);
+    CHECK(storage.check_invariants());
+}
+
+TEST_CASE("TextStorage typing forward benchmark pattern preserves text") {
+    const auto ops = shortened_typing_script(
+        "This is a typing benchmark.\n",
+        8,
+        "ed ",
+        64);
+    std::string expected_text = "prefix\nsuffix\n";
+    vitality::TextStorage storage = vitality::TextStorage::from_utf8(expected_text);
+    int cursor = 7;
+
+    for (const TypingOp op : ops) {
+        if (op.kind != TypingOpKind::InsertByte) {
+            continue;
+        }
+
+        const auto inserted = storage.insert(
+            vitality::ByteOffset{cursor},
+            std::string_view(&op.byte, 1));
+        REQUIRE(inserted.success);
+        expected_text.insert(static_cast<std::size_t>(cursor), 1, op.byte);
+        ++cursor;
+    }
+
+    CHECK(storage.text() == expected_text);
+    CHECK(storage.check_invariants());
+}
+
+TEST_CASE("TextStorage typing mix benchmark pattern preserves text") {
+    const auto ops = shortened_typing_script(
+        "// comment about storage typing\n",
+        10,
+        "ok",
+        24);
+    std::string expected_text = "prefix\nsuffix\n";
+    vitality::TextStorage storage = vitality::TextStorage::from_utf8(expected_text);
+    int cursor = 7;
+
+    for (const TypingOp op : ops) {
+        if (op.kind == TypingOpKind::InsertByte) {
+            const auto inserted = storage.insert(
+                vitality::ByteOffset{cursor},
+                std::string_view(&op.byte, 1));
+            REQUIRE(inserted.success);
+            expected_text.insert(static_cast<std::size_t>(cursor), 1, op.byte);
+            ++cursor;
+            continue;
+        }
+
+        if (cursor == 0 || storage.byte_count().value == 0) {
+            continue;
+        }
+
+        const auto erased = storage.erase(vitality::ByteRange{
+            .start = vitality::ByteOffset{cursor - 1},
+            .length = vitality::ByteCount{1},
+        });
+        REQUIRE(erased.success);
+        expected_text.erase(static_cast<std::size_t>(cursor - 1), 1);
+        --cursor;
+    }
+
+    CHECK(storage.text() == expected_text);
     CHECK(storage.check_invariants());
 }

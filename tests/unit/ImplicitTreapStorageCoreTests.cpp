@@ -155,3 +155,104 @@ TEST_CASE("ImplicitTreapStorageCore compaction keeps text and invariants for an 
     CHECK(core.piece_count() == 1);
     CHECK(core.check_invariants());
 }
+
+TEST_CASE("ImplicitTreapStorageCore recent contiguous insert appends to the same add piece") {
+    vitality::buffer_internal::ImplicitTreapStorageCore core;
+
+    core.insert(vitality::ByteOffset{0}, "a");
+    core.insert(vitality::ByteOffset{1}, "b");
+    core.insert(vitality::ByteOffset{2}, "c");
+
+    CHECK(core.text() == std::string_view("abc"));
+    CHECK(core.piece_count() == 1);
+    CHECK(core.check_invariants());
+}
+
+TEST_CASE("ImplicitTreapStorageCore recent contiguous insert works in the middle of existing text") {
+    vitality::buffer_internal::ImplicitTreapStorageCore core("XXYY");
+
+    core.insert(vitality::ByteOffset{2}, "a");
+    core.insert(vitality::ByteOffset{3}, "b");
+    core.insert(vitality::ByteOffset{4}, "c");
+
+    CHECK(core.text() == std::string_view("XXabcYY"));
+    CHECK(core.piece_count() <= 3);
+    CHECK(core.check_invariants());
+}
+
+TEST_CASE("ImplicitTreapStorageCore immediate backspace shrinks the recent typed suffix") {
+    vitality::buffer_internal::ImplicitTreapStorageCore core;
+
+    core.insert(vitality::ByteOffset{0}, "a");
+    core.insert(vitality::ByteOffset{1}, "b");
+    core.insert(vitality::ByteOffset{2}, "c");
+
+    core.erase(vitality::ByteRange{
+        .start = vitality::ByteOffset{2},
+        .length = vitality::ByteCount{1},
+    });
+    CHECK(core.text() == std::string_view("ab"));
+    CHECK(core.check_invariants());
+
+    core.erase(vitality::ByteRange{
+        .start = vitality::ByteOffset{1},
+        .length = vitality::ByteCount{1},
+    });
+    CHECK(core.text() == std::string_view("a"));
+    CHECK(core.check_invariants());
+
+    core.erase(vitality::ByteRange{
+        .start = vitality::ByteOffset{0},
+        .length = vitality::ByteCount{1},
+    });
+    CHECK(core.text().empty());
+    CHECK(core.check_invariants());
+}
+
+TEST_CASE("ImplicitTreapStorageCore non contiguous insert invalidates recent edit state safely") {
+    vitality::buffer_internal::ImplicitTreapStorageCore core;
+
+    core.insert(vitality::ByteOffset{0}, "a");
+    core.insert(vitality::ByteOffset{1}, "b");
+    core.insert(vitality::ByteOffset{0}, "Z");
+    core.insert(vitality::ByteOffset{3}, "c");
+
+    CHECK(core.text() == std::string_view("Zabc"));
+    CHECK(core.check_invariants());
+}
+
+TEST_CASE("ImplicitTreapStorageCore erase outside recent typed suffix falls back safely") {
+    vitality::buffer_internal::ImplicitTreapStorageCore core;
+
+    core.insert(vitality::ByteOffset{0}, "a");
+    core.insert(vitality::ByteOffset{1}, "b");
+    core.insert(vitality::ByteOffset{2}, "c");
+    core.erase(vitality::ByteRange{
+        .start = vitality::ByteOffset{0},
+        .length = vitality::ByteCount{1},
+    });
+
+    CHECK(core.text() == std::string_view("bc"));
+    CHECK(core.check_invariants());
+}
+
+TEST_CASE("ImplicitTreapStorageCore compaction clears recent edit tracking safely") {
+    vitality::buffer_internal::ImplicitTreapStorageCore core("XXYY");
+
+    for (int index = 0; index < 3; ++index) {
+        core.insert(vitality::ByteOffset{2 + index}, "a");
+    }
+    CHECK(core.text() == std::string_view("XXaaaYY"));
+    CHECK(core.check_invariants());
+
+    CHECK(core.compact_with_merge_budget(128) == 0);
+
+    core.insert(vitality::ByteOffset{5}, "b");
+    core.erase(vitality::ByteRange{
+        .start = vitality::ByteOffset{5},
+        .length = vitality::ByteCount{1},
+    });
+
+    CHECK(core.text() == std::string_view("XXaaaYY"));
+    CHECK(core.check_invariants());
+}

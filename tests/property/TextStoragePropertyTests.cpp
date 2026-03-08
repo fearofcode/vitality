@@ -2,6 +2,8 @@
 #include <string_view>
 #include <vector>
 
+#include <cstdint>
+
 #include <catch2/catch_test_macros.hpp>
 #include <rapidcheck/catch.h>
 #include <rapidcheck/gen/Container.h>
@@ -38,10 +40,10 @@ namespace {
 [[nodiscard]] vitality::ByteCursorPos reference_clamp_cursor(
     const std::vector<std::string> &lines,
     const vitality::ByteCursorPos cursor) {
-    const int last_line = static_cast<int>(lines.size()) - 1;
-    const int clamped_line = std::clamp(cursor.line.value, 0, last_line);
-    const int max_column = static_cast<int>(lines[clamped_line].size());
-    const int clamped_column = std::clamp(cursor.column.value, 0, max_column);
+    const std::int64_t last_line = static_cast<std::int64_t>(lines.size()) - 1;
+    const std::int64_t clamped_line = std::clamp<std::int64_t>(cursor.line.value, 0, last_line);
+    const std::int64_t max_column = static_cast<std::int64_t>(lines[static_cast<std::size_t>(clamped_line)].size());
+    const std::int64_t clamped_column = std::clamp<std::int64_t>(cursor.column.value, 0, max_column);
     return vitality::ByteCursorPos{
         .line = vitality::LineIndex{clamped_line},
         .column = vitality::ByteColumn{clamped_column},
@@ -59,14 +61,14 @@ TEST_CASE("TextStorage preserves exact bytes and matches a reference line model"
         const vitality::TextStorage storage = vitality::TextStorage::from_utf8(text);
 
         RC_ASSERT(storage.text() == text);
-        RC_ASSERT(storage.line_count().value == static_cast<int>(reference_lines.size()));
+        RC_ASSERT(storage.line_count().value == static_cast<std::int64_t>(reference_lines.size()));
         RC_ASSERT(storage.check_invariants());
 
-        for (int index = 0; index < storage.line_count().value; ++index) {
+        for (std::int64_t index = 0; index < storage.line_count().value; ++index) {
             const auto line_text = storage.line_text(vitality::LineIndex{index});
-            RC_ASSERT(line_text.utf8_text == reference_lines[index]);
+            RC_ASSERT(line_text.utf8_text == reference_lines[static_cast<std::size_t>(index)]);
             RC_ASSERT(storage.line_length(vitality::LineIndex{index}).value ==
-                      static_cast<int>(reference_lines[index].size()));
+                      static_cast<std::int64_t>(reference_lines[static_cast<std::size_t>(index)].size()));
         }
     });
 }
@@ -79,8 +81,8 @@ TEST_CASE("TextStorage clamp_cursor matches the reference model and is idempoten
         const auto reference_lines = split_reference_lines(text);
         const vitality::TextStorage storage = vitality::TextStorage::from_utf8(text);
         const vitality::ByteCursorPos cursor{
-            .line = vitality::LineIndex{*rc::gen::arbitrary<int>()},
-            .column = vitality::ByteColumn{*rc::gen::arbitrary<int>()},
+            .line = vitality::LineIndex{static_cast<std::int64_t>(*rc::gen::arbitrary<int>())},
+            .column = vitality::ByteColumn{static_cast<std::int64_t>(*rc::gen::arbitrary<int>())},
         };
 
         const vitality::ByteCursorPos first = storage.clamp_cursor(cursor);

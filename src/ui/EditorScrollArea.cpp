@@ -21,6 +21,13 @@ namespace vitality {
 
 namespace {
 
+[[nodiscard]] int clamp_to_qt_int(const std::int64_t value) {
+    return static_cast<int>(std::clamp<std::int64_t>(
+        value,
+        std::numeric_limits<int>::min(),
+        std::numeric_limits<int>::max()));
+}
+
 void prepare_layout(QTextLayout &layout) {
     QTextOption option;
     option.setWrapMode(QTextOption::NoWrap);
@@ -128,8 +135,8 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
     // sets its range/page step in line units, so value() is the first visible line index.
     const int top_line = verticalScrollBar()->value();
     const int bottom_line_exclusive = std::min(
-        top_line + visible_line_count().value,
-        buffer_.line_count().value);
+        clamp_to_qt_int(static_cast<std::int64_t>(top_line) + visible_line_count().value),
+        clamp_to_qt_int(buffer_.line_count().value));
     const int horizontal_offset_pixels = horizontal_scroll_offset_pixels();
     const int fallback_cursor_width = std::max(fontMetrics().horizontalAdvance(QLatin1Char(' ')), 1);
 
@@ -225,16 +232,19 @@ int EditorScrollArea::horizontal_scroll_offset_pixels() const {
 
 int EditorScrollArea::document_max_line_length() const {
     int max_length = 0;
-    for (int line_index = 0; line_index < buffer_.line_count().value; ++line_index) {
-        max_length = std::max(max_length, buffer_.line_length(LineIndex{line_index}).value);
+    for (std::int64_t line_index = 0; line_index < buffer_.line_count().value; ++line_index) {
+        const auto line_length = buffer_.line_length(LineIndex{line_index}).value;
+        const int clamped_line_length = static_cast<int>(
+            std::min<std::int64_t>(line_length, std::numeric_limits<int>::max()));
+        max_length = std::max(max_length, clamped_line_length);
     }
 
     return max_length;
 }
 
 void EditorScrollArea::refresh_scrollbars() const {
-    const int visible_lines = visible_line_count().value;
-    const int total_lines = buffer_.line_count().value;
+    const int visible_lines = clamp_to_qt_int(visible_line_count().value);
+    const int total_lines = clamp_to_qt_int(buffer_.line_count().value);
     verticalScrollBar()->setPageStep(visible_lines);
     verticalScrollBar()->setRange(0, std::max(total_lines - visible_lines, 0));
 
@@ -245,14 +255,15 @@ void EditorScrollArea::refresh_scrollbars() const {
 }
 
 void EditorScrollArea::ensure_cursor_visible() const {
-    const int visible_lines = visible_line_count().value;
+    const int visible_lines = clamp_to_qt_int(visible_line_count().value);
     const int top_line = verticalScrollBar()->value();
     const int bottom_line = top_line + visible_lines - 1;
 
     if (cursor_.line.value < top_line) {
-        verticalScrollBar()->setValue(cursor_.line.value);
+        verticalScrollBar()->setValue(clamp_to_qt_int(cursor_.line.value));
     } else if (cursor_.line.value > bottom_line) {
-        verticalScrollBar()->setValue(cursor_.line.value - visible_lines + 1);
+        verticalScrollBar()->setValue(
+            clamp_to_qt_int(cursor_.line.value - static_cast<std::int64_t>(visible_lines) + 1));
     }
 
     const int visible_columns = visible_column_count();
@@ -260,9 +271,10 @@ void EditorScrollArea::ensure_cursor_visible() const {
     const int right_column = left_column + visible_columns - 1;
 
     if (cursor_.column.value < left_column) {
-        horizontalScrollBar()->setValue(cursor_.column.value);
+        horizontalScrollBar()->setValue(clamp_to_qt_int(cursor_.column.value));
     } else if (cursor_.column.value > right_column) {
-        horizontalScrollBar()->setValue(cursor_.column.value - visible_columns + 1);
+        horizontalScrollBar()->setValue(
+            clamp_to_qt_int(cursor_.column.value - static_cast<std::int64_t>(visible_columns) + 1));
     }
 }
 

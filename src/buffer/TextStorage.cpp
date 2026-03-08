@@ -1,6 +1,7 @@
 #include "buffer/TextStorage.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <iterator>
 #include <utility>
 
@@ -49,7 +50,7 @@ struct TextStorage::Impl {
 
 namespace {
 
-[[nodiscard]] int clamp_int(const int value, const int minimum, const int maximum) {
+[[nodiscard]] std::int64_t clamp_int(const std::int64_t value, const std::int64_t minimum, const std::int64_t maximum) {
     return std::clamp(value, minimum, maximum);
 }
 
@@ -62,7 +63,7 @@ struct LineByteRange {
 [[nodiscard]] LineByteRange line_byte_range(
     const buffer_internal::ImplicitTreapStorageCore &core,
     const LineIndex line) {
-    const int total_lines = static_cast<int>(core.line_count());
+    const std::int64_t total_lines = static_cast<std::int64_t>(core.line_count());
     if (line.value < 0 || line.value >= total_lines) {
         return {};
     }
@@ -117,11 +118,11 @@ TextStorage &TextStorage::operator=(TextStorage &&other) noexcept = default;
 TextStorage::~TextStorage() = default;
 
 ByteCount TextStorage::byte_count() const {
-    return ByteCount{static_cast<int>(impl_->core.byte_count())};
+    return ByteCount{static_cast<std::int64_t>(impl_->core.byte_count())};
 }
 
 LineCount TextStorage::line_count() const {
-    return LineCount{static_cast<int>(impl_->core.line_count())};
+    return LineCount{static_cast<std::int64_t>(impl_->core.line_count())};
 }
 
 LineText TextStorage::line_text(const LineIndex line) const {
@@ -141,14 +142,14 @@ ByteColumn TextStorage::line_length(const LineIndex line) const {
         return ByteColumn{};
     }
 
-    return ByteColumn{static_cast<int>(range.end - range.start)};
+    return ByteColumn{static_cast<std::int64_t>(range.end - range.start)};
 }
 
 ByteCursorPos TextStorage::clamp_cursor(const ByteCursorPos cursor) const {
-    const int last_line_index = line_count().value - 1;
-    const int clamped_line = clamp_int(cursor.line.value, 0, last_line_index);
-    const int max_column = line_length(LineIndex{clamped_line}).value;
-    const int clamped_column = clamp_int(cursor.column.value, 0, max_column);
+    const std::int64_t last_line_index = line_count().value - 1;
+    const std::int64_t clamped_line = clamp_int(cursor.line.value, 0, last_line_index);
+    const std::int64_t max_column = line_length(LineIndex{clamped_line}).value;
+    const std::int64_t clamped_column = clamp_int(cursor.column.value, 0, max_column);
 
     return ByteCursorPos{
         .line = LineIndex{clamped_line},
@@ -176,7 +177,7 @@ InsertTextResult TextStorage::insert(const ByteOffset offset, const std::string_
     return InsertTextResult{
         .inserted_range = ByteRange{
             .start = offset,
-            .length = ByteCount{static_cast<int>(utf8_text.size())},
+            .length = ByteCount{static_cast<std::int64_t>(utf8_text.size())},
         },
         .success = true,
     };

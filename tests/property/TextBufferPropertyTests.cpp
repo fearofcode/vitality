@@ -1,4 +1,5 @@
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -84,7 +85,7 @@ private:
         return false;
     }
 
-    const int line_length = buffer.line_length(cursor.line).value;
+    const std::int64_t line_length = buffer.line_length(cursor.line).value;
     return cursor.column.value >= 0 && cursor.column.value <= line_length;
 }
 
@@ -129,14 +130,14 @@ TEST_CASE("boundary movement becomes idempotent at the edges") {
         vitality::ByteCursorPos left = cursor;
         vitality::ByteCursorPos up = cursor;
         vitality::ByteCursorPos down = cursor;
-        const int left_iterations = buffer.line_length(cursor.line).value + 1;
-        const int vertical_iterations = buffer.line_count().value + 1;
+        const std::int64_t left_iterations = buffer.line_length(cursor.line).value + 1;
+        const std::int64_t vertical_iterations = buffer.line_count().value + 1;
 
-        for (int i = 0; i < left_iterations; ++i) {
+        for (std::int64_t i = 0; i < left_iterations; ++i) {
             left = buffer.move_left(left);
         }
 
-        for (int i = 0; i < vertical_iterations; ++i) {
+        for (std::int64_t i = 0; i < vertical_iterations; ++i) {
             up = buffer.move_up(up);
             down = buffer.move_down(down);
         }
