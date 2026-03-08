@@ -126,13 +126,13 @@ LineCount TextStorage::line_count() const {
 }
 
 LineText TextStorage::line_text(const LineIndex line) const {
-    const LineByteRange range = line_byte_range(impl_->core, line);
-    if (!range.valid) {
+    const auto [start, end, valid] = line_byte_range(impl_->core, line);
+    if (!valid) {
         return LineText{};
     }
 
     return LineText{
-        .utf8_text = impl_->core.substring(range.start, range.end - range.start),
+        .utf8_text = impl_->core.substring(start, end - start),
     };
 }
 

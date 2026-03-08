@@ -37,6 +37,13 @@ void append_piece_range(
         return;
     }
 
+    // end is caller-derived overlap math and should normally already be inside
+    // the piece, but clamp it defensively so this helper always enforces the
+    // legal local half-open interval:
+    //   [begin, end) intersect [0, piece.length) -> [begin, clamped_end)
+    //
+    // That keeps this helper robust even if a caller hands us a range that
+    // would otherwise describe bytes past the piece boundary.
     const std::size_t clamped_end = std::min(end, piece.length);
     const std::size_t len = clamped_end - begin;
 
@@ -189,6 +196,8 @@ void ImplicitTreapStorageCore::extend_tail_node_with_inserted_suffix(Node *const
 std::unique_ptr<ImplicitTreapStorageCore::Node> ImplicitTreapStorageCore::merge(
     std::unique_ptr<Node> left,
     std::unique_ptr<Node> right) {
+    // Branch 1: one side is empty, so the other side is already the full
+    // merged result.
     if (!left) {
         return right;
     }
@@ -196,12 +205,16 @@ std::unique_ptr<ImplicitTreapStorageCore::Node> ImplicitTreapStorageCore::merge(
         return left;
     }
 
+    // Branch 2: left root wins the heap/priority comparison, so it stays the
+    // root and we recursively merge into its right subtree.
     if (left->priority >= right->priority) {
         left->right = merge(std::move(left->right), std::move(right));
         pull(left.get());
         return left;
     }
 
+    // Branch 3: right root wins the priority comparison, so it stays the root
+    // and we recursively merge into its left subtree.
     right->left = merge(std::move(left), std::move(right->left));
     pull(right.get());
     return right;
@@ -563,6 +576,7 @@ ImplicitTreapStorageCore::split_by_offset(std::unique_ptr<Node> root, const std:
     const std::size_t left_bytes = node_bytes(root->left);
     const std::size_t piece_length = root->piece.length;
 
+    // Branch 1: the split point lands strictly inside the left subtree.
     if (offset < left_bytes) {
         auto [left_tree, right_tree] = split_by_offset(std::move(root->left), offset);
         root->left = std::move(right_tree);
@@ -570,6 +584,9 @@ ImplicitTreapStorageCore::split_by_offset(std::unique_ptr<Node> root, const std:
         return {std::move(left_tree), std::move(root)};
     }
 
+    // Branch 2: the split point lands strictly inside the right subtree.
+    // Rebase the offset so the recursive call sees it relative to the start of
+    // that subtree, not the start of the current node's full range.
     if (offset > left_bytes + piece_length) {
         auto [left_tree, right_tree] = split_by_offset(
             std::move(root->right),
@@ -579,6 +596,7 @@ ImplicitTreapStorageCore::split_by_offset(std::unique_ptr<Node> root, const std:
         return {std::move(root), std::move(right_tree)};
     }
 
+    // Branch 3: split exactly before the current piece.
     if (offset == left_bytes) {
         auto left_tree = std::move(root->left);
         root->left.reset();
@@ -586,6 +604,7 @@ ImplicitTreapStorageCore::split_by_offset(std::unique_ptr<Node> root, const std:
         return {std::move(left_tree), std::move(root)};
     }
 
+    // Branch 4: split exactly after the current piece.
     if (offset == left_bytes + piece_length) {
         auto right_tree = std::move(root->right);
         root->right.reset();
@@ -593,6 +612,9 @@ ImplicitTreapStorageCore::split_by_offset(std::unique_ptr<Node> root, const std:
         return {std::move(root), std::move(right_tree)};
     }
 
+    // Branch 5: the split lands inside the current piece, so one piece
+    // descriptor becomes two descriptors that still point into the same
+    // backing buffer.
     const std::size_t local_offset = offset - left_bytes;
     auto [left_piece, right_piece] = split_piece_at(root->piece, local_offset);
     std::vector<std::size_t> left_offsets;
@@ -609,6 +631,9 @@ ImplicitTreapStorageCore::split_by_offset(std::unique_ptr<Node> root, const std:
 
     auto left_subtree = std::move(root->left);
     auto right_subtree = std::move(root->right);
+    // Keep the original node priority for both fragments so the untouched
+    // ancestors above this local rewrite still satisfy the treap priority
+    // ordering.
     auto left_piece_node = make_node_with_offsets(left_piece, root->priority, std::move(left_offsets));
     auto right_piece_node = make_node_with_offsets(right_piece, root->priority, std::move(right_offsets));
 
@@ -779,20 +804,32 @@ void ImplicitTreapStorageCore::collect_range(
         return;
     }
 
+    // base is the running absolute origin for this recursive frame: "the first
+    // byte represented by this subtree starts at absolute document offset
+    // base". We intentionally carry that down the traversal instead of storing
+    // absolute offsets on every node, because absolute offsets would become
+    // stale after inserts/deletes/rebalancing and would require broad updates.
     const std::size_t left_bytes = node_bytes(node->left);
     const std::size_t node_begin = base + left_bytes;
     const std::size_t node_end = node_begin + node->piece.length;
 
+    // Branch 1: recurse left only if the requested absolute range reaches into
+    // the left subtree interval [base, node_begin).
     if (start < node_begin) {
         collect_range(node->left.get(), start, end, base, out);
     }
 
     const std::size_t overlap_start = std::max(start, node_begin);
     const std::size_t overlap_end = std::min(end, node_end);
+    // Branch 2: append the overlap from the current piece if the query range
+    // intersects [node_begin, node_end).
     if (overlap_start < overlap_end) {
         append_piece_range(out, storage_, node->piece, overlap_start - node_begin, overlap_end - node_begin);
     }
 
+    // Branch 3: recurse right only if the requested range extends beyond the
+    // current piece. The right subtree begins at node_end in absolute document
+    // coordinates.
     if (end > node_end) {
         collect_range(node->right.get(), start, end, node_end, out);
     }
