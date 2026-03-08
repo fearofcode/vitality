@@ -55,7 +55,7 @@ TEST_CASE("make_empty creates one empty line and no file path") {
     const vitality::TextBuffer buffer = vitality::TextBuffer::make_empty();
 
     CHECK(buffer.line_count().value == 1);
-    CHECK_FALSE(buffer.has_file_path());
+    CHECK(!buffer.has_file_path());
     CHECK(buffer.line_length(vitality::LineIndex{0}).value == 0);
 }
 
@@ -70,8 +70,8 @@ TEST_CASE("load_from_path preserves line order and strips newlines") {
     CHECK(buffer.line_count().value == 2);
     CHECK(buffer.has_file_path());
     CHECK(buffer.display_name() == std::string_view(temp_file.path().filename().string()));
-    CHECK(buffer.line_text(vitality::LineIndex{0}).utf8_text == std::string_view("alpha"));
-    CHECK(buffer.line_text(vitality::LineIndex{1}).utf8_text == std::string_view("beta"));
+    CHECK(buffer.line_text(vitality::LineIndex{0}).utf8_text == "alpha");
+    CHECK(buffer.line_text(vitality::LineIndex{1}).utf8_text == "beta");
 }
 
 TEST_CASE("loading an empty file creates one empty logical line") {
@@ -85,12 +85,24 @@ TEST_CASE("loading an empty file creates one empty logical line") {
     CHECK(load_result.buffer.line_length(vitality::LineIndex{0}).value == 0);
 }
 
+TEST_CASE("load_from_path normalizes CRLF to LF") {
+    TempFile temp_file("alpha\r\nbeta\r\n");
+    const vitality::FilePath file_path = vitality::FilePath::from_command_line_arg(temp_file.path().c_str());
+
+    auto load_result = vitality::TextBuffer::load_from_path(file_path);
+
+    REQUIRE(load_result.success);
+    CHECK(load_result.buffer.line_count().value == 2);
+    CHECK(load_result.buffer.line_text(vitality::LineIndex{0}).utf8_text == "alpha");
+    CHECK(load_result.buffer.line_text(vitality::LineIndex{1}).utf8_text == "beta");
+}
+
 TEST_CASE("clamp_cursor fixes out of range line and column values") {
     const vitality::TextBuffer buffer = load_buffer_from_contents("abcd\nef\n");
 
-    const vitality::CursorPos clamped = buffer.clamp_cursor(vitality::CursorPos{
+    const vitality::ByteCursorPos clamped = buffer.clamp_cursor(vitality::ByteCursorPos{
         .line = vitality::LineIndex{99},
-        .column = vitality::ColumnIndex{99},
+        .column = vitality::ByteColumn{99},
     });
 
     CHECK(clamped.line.value == 1);
@@ -99,47 +111,47 @@ TEST_CASE("clamp_cursor fixes out of range line and column values") {
 
 TEST_CASE("horizontal movement clamps at line edges") {
     const vitality::TextBuffer buffer = load_buffer_from_contents("abc\n");
-    const vitality::CursorPos start{
+    const vitality::ByteCursorPos start{
         .line = vitality::LineIndex{0},
-        .column = vitality::ColumnIndex{0},
+        .column = vitality::ByteColumn{0},
     };
 
     CHECK(buffer.move_left(start).column.value == 0);
-    CHECK(buffer.move_right(vitality::CursorPos{
+    CHECK(buffer.move_right(vitality::ByteCursorPos{
               .line = vitality::LineIndex{0},
-              .column = vitality::ColumnIndex{3},
+              .column = vitality::ByteColumn{3},
           }).column.value == 3);
 }
 
 TEST_CASE("vertical movement clamps to buffer bounds and line length") {
     const vitality::TextBuffer buffer = load_buffer_from_contents("abcdef\nxy\n");
 
-    const vitality::CursorPos moved_up = buffer.move_up(vitality::CursorPos{
+    const vitality::ByteCursorPos moved_up = buffer.move_up(vitality::ByteCursorPos{
         .line = vitality::LineIndex{0},
-        .column = vitality::ColumnIndex{3},
+        .column = vitality::ByteColumn{3},
     });
     CHECK(moved_up.line.value == 0);
     CHECK(moved_up.column.value == 3);
 
-    const vitality::CursorPos moved_down = buffer.move_down(vitality::CursorPos{
+    const vitality::ByteCursorPos moved_down = buffer.move_down(vitality::ByteCursorPos{
         .line = vitality::LineIndex{0},
-        .column = vitality::ColumnIndex{5},
+        .column = vitality::ByteColumn{5},
     });
     CHECK(moved_down.line.value == 1);
     CHECK(moved_down.column.value == 2);
 
-    const vitality::CursorPos at_bottom = buffer.move_down(vitality::CursorPos{
+    const vitality::ByteCursorPos at_bottom = buffer.move_down(vitality::ByteCursorPos{
         .line = vitality::LineIndex{1},
-        .column = vitality::ColumnIndex{1},
+        .column = vitality::ByteColumn{1},
     });
     CHECK(at_bottom.line.value == 1);
 }
 
 TEST_CASE("home end and paging respect line bounds") {
     const vitality::TextBuffer buffer = load_buffer_from_contents("abc\n12345\nxy\n");
-    const vitality::CursorPos cursor{
+    const vitality::ByteCursorPos cursor{
         .line = vitality::LineIndex{1},
-        .column = vitality::ColumnIndex{2},
+        .column = vitality::ByteColumn{2},
     };
 
     CHECK(buffer.move_home(cursor).column.value == 0);

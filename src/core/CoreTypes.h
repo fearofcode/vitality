@@ -6,8 +6,21 @@ struct LineIndex {
     int value = 0;
 };
 
-struct ColumnIndex {
+struct ByteOffset {
     int value = 0;
+};
+
+struct ByteCount {
+    int value = 0;
+};
+
+struct ByteColumn {
+    int value = 0;
+};
+
+struct ByteRange {
+    ByteOffset start;
+    ByteCount length;
 };
 
 struct LineCount {
@@ -18,9 +31,9 @@ struct VisibleLineCount {
     int value = 0;
 };
 
-struct CursorPos {
+struct ByteCursorPos {
     LineIndex line;
-    ColumnIndex column;
+    ByteColumn column;
 };
 
 }  // namespace vitality

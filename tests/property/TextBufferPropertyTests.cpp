@@ -72,14 +72,14 @@ private:
     return std::move(load_result.buffer);
 }
 
-[[nodiscard]] vitality::CursorPos make_cursor(const vitality::TextBuffer &buffer, const int line, const int column) {
-    return buffer.clamp_cursor(vitality::CursorPos{
+[[nodiscard]] vitality::ByteCursorPos make_cursor(const vitality::TextBuffer &buffer, const int line, const int column) {
+    return buffer.clamp_cursor(vitality::ByteCursorPos{
         .line = vitality::LineIndex{line},
-        .column = vitality::ColumnIndex{column},
+        .column = vitality::ByteColumn{column},
     });
 }
 
-[[nodiscard]] bool is_valid_cursor(const vitality::TextBuffer &buffer, const vitality::CursorPos cursor) {
+[[nodiscard]] bool is_valid_cursor(const vitality::TextBuffer &buffer, const vitality::ByteCursorPos cursor) {
     if (cursor.line.value < 0 || cursor.line.value >= buffer.line_count().value) {
         return false;
     }
@@ -100,7 +100,7 @@ TEST_CASE("navigation methods always return valid cursors") {
         const vitality::TextBuffer buffer = load_buffer_from_lines(raw_lines);
         const int raw_line = *rc::gen::arbitrary<int>();
         const int raw_column = *rc::gen::arbitrary<int>();
-        const vitality::CursorPos cursor = make_cursor(buffer, raw_line, raw_column);
+        const vitality::ByteCursorPos cursor = make_cursor(buffer, raw_line, raw_column);
 
         RC_ASSERT(is_valid_cursor(buffer, buffer.move_left(cursor)));
         RC_ASSERT(is_valid_cursor(buffer, buffer.move_right(cursor)));
@@ -121,14 +121,14 @@ TEST_CASE("boundary movement becomes idempotent at the edges") {
         raw_lines = sanitize_lines(std::move(raw_lines));
 
         const vitality::TextBuffer buffer = load_buffer_from_lines(raw_lines);
-        const vitality::CursorPos cursor = make_cursor(
+        const vitality::ByteCursorPos cursor = make_cursor(
             buffer,
             *rc::gen::arbitrary<int>(),
             *rc::gen::arbitrary<int>());
 
-        vitality::CursorPos left = cursor;
-        vitality::CursorPos up = cursor;
-        vitality::CursorPos down = cursor;
+        vitality::ByteCursorPos left = cursor;
+        vitality::ByteCursorPos up = cursor;
+        vitality::ByteCursorPos down = cursor;
         const int left_iterations = buffer.line_length(cursor.line).value + 1;
         const int vertical_iterations = buffer.line_count().value + 1;
 
@@ -141,8 +141,8 @@ TEST_CASE("boundary movement becomes idempotent at the edges") {
             down = buffer.move_down(down);
         }
 
-        const vitality::CursorPos line_end = buffer.move_end(cursor);
-        vitality::CursorPos right = line_end;
+        const vitality::ByteCursorPos line_end = buffer.move_end(cursor);
+        vitality::ByteCursorPos right = line_end;
         for (int i = 0; i < 64; ++i) {
             right = buffer.move_right(right);
         }
@@ -166,11 +166,11 @@ TEST_CASE("clamp_cursor is idempotent") {
         raw_lines = sanitize_lines(std::move(raw_lines));
 
         const vitality::TextBuffer buffer = load_buffer_from_lines(raw_lines);
-        const vitality::CursorPos first = buffer.clamp_cursor(vitality::CursorPos{
+        const vitality::ByteCursorPos first = buffer.clamp_cursor(vitality::ByteCursorPos{
             .line = vitality::LineIndex{*rc::gen::arbitrary<int>()},
-            .column = vitality::ColumnIndex{*rc::gen::arbitrary<int>()},
+            .column = vitality::ByteColumn{*rc::gen::arbitrary<int>()},
         });
-        const vitality::CursorPos second = buffer.clamp_cursor(first);
+        const vitality::ByteCursorPos second = buffer.clamp_cursor(first);
 
         RC_ASSERT(first.line.value == second.line.value);
         RC_ASSERT(first.column.value == second.column.value);

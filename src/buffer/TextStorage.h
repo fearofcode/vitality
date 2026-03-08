@@ -21,10 +21,15 @@ public:
     TextStorage &operator=(const TextStorage &) = delete;
     ~TextStorage();
 
+    [[nodiscard]] ByteCount byte_count() const;
     [[nodiscard]] LineCount line_count() const;
-    [[nodiscard]] LineTextView line_text(LineIndex line) const;
-    [[nodiscard]] ColumnIndex line_length(LineIndex line) const;
-    [[nodiscard]] CursorPos clamp_cursor(CursorPos cursor) const;
+    [[nodiscard]] LineText line_text(LineIndex line) const;
+    [[nodiscard]] ByteColumn line_length(LineIndex line) const;
+    [[nodiscard]] ByteCursorPos clamp_cursor(ByteCursorPos cursor) const;
+    [[nodiscard]] std::string text() const;
+    [[nodiscard]] bool check_invariants() const;
+    [[nodiscard]] InsertTextResult insert(ByteOffset offset, std::string_view utf8_text);
+    [[nodiscard]] EraseTextResult erase(ByteRange range);
 
 private:
     struct Impl;

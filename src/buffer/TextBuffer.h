@@ -8,7 +8,7 @@
 namespace vitality {
 
 class FilePath;
-struct LineTextView;
+struct LineText;
 struct BufferLoadResult;
 class TextStorage;
 
@@ -26,18 +26,18 @@ public:
     [[nodiscard]] LineCount line_count() const;
     [[nodiscard]] bool has_file_path() const;
     [[nodiscard]] std::string_view display_name() const;
-    [[nodiscard]] LineTextView line_text(LineIndex line) const;
-    [[nodiscard]] ColumnIndex line_length(LineIndex line) const;
+    [[nodiscard]] LineText line_text(LineIndex line) const;
+    [[nodiscard]] ByteColumn line_length(LineIndex line) const;
 
-    [[nodiscard]] CursorPos clamp_cursor(CursorPos cursor) const;
-    [[nodiscard]] CursorPos move_left(CursorPos cursor) const;
-    [[nodiscard]] CursorPos move_right(CursorPos cursor) const;
-    [[nodiscard]] CursorPos move_up(CursorPos cursor) const;
-    [[nodiscard]] CursorPos move_down(CursorPos cursor) const;
-    [[nodiscard]] CursorPos move_page_up(CursorPos cursor, VisibleLineCount visible_lines) const;
-    [[nodiscard]] CursorPos move_page_down(CursorPos cursor, VisibleLineCount visible_lines) const;
-    [[nodiscard]] CursorPos move_home(CursorPos cursor) const;
-    [[nodiscard]] CursorPos move_end(CursorPos cursor) const;
+    [[nodiscard]] ByteCursorPos clamp_cursor(ByteCursorPos cursor) const;
+    [[nodiscard]] ByteCursorPos move_left(ByteCursorPos cursor) const;
+    [[nodiscard]] ByteCursorPos move_right(ByteCursorPos cursor) const;
+    [[nodiscard]] ByteCursorPos move_up(ByteCursorPos cursor) const;
+    [[nodiscard]] ByteCursorPos move_down(ByteCursorPos cursor) const;
+    [[nodiscard]] ByteCursorPos move_page_up(ByteCursorPos cursor, VisibleLineCount visible_lines) const;
+    [[nodiscard]] ByteCursorPos move_page_down(ByteCursorPos cursor, VisibleLineCount visible_lines) const;
+    [[nodiscard]] ByteCursorPos move_home(ByteCursorPos cursor) const;
+    [[nodiscard]] ByteCursorPos move_end(ByteCursorPos cursor) const;
 
 private:
     struct Impl;

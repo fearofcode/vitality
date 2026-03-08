@@ -12,6 +12,11 @@
 #include "ui/StatusBarText.h"
 #include "ui/Utf8QtTextMapper.h"
 
+// and now here is some non-Latin text to deal with:
+// こんにちは
+// 👩‍💻 zero width joiners I guess?
+// السلام عليكم
+
 namespace vitality {
 
 namespace {
@@ -24,25 +29,31 @@ void prepare_layout(QTextLayout &layout) {
     layout.beginLayout();
     if (QTextLine line = layout.createLine(); line.isValid()) {
         line.setPosition(QPointF(0.0, 0.0));
-        line.setLineWidth(std::numeric_limits<int>::max() / 4);
+        line.setLineWidth(static_cast<qreal>(std::numeric_limits<int>::max()) / 4.0);
     }
     layout.endLayout();
 }
 
-[[nodiscard]] int block_cursor_width(const QTextLine &line, const int cursor_position, const int text_length, const int fallback_width) {
+struct BlockCursorWidthRequest {
+    int cursor_position = 0;
+    int text_length = 0;
+    int fallback_width = 1;
+};
+
+[[nodiscard]] int block_cursor_width(const QTextLine &line, const BlockCursorWidthRequest request) {
     if (!line.isValid()) {
-        return fallback_width;
+        return request.fallback_width;
     }
 
-    if (cursor_position < text_length) {
-        const qreal current_x = line.cursorToX(cursor_position);
-        const qreal next_x = line.cursorToX(cursor_position + 1);
+    if (request.cursor_position < request.text_length) {
+        const qreal current_x = line.cursorToX(request.cursor_position);
+        const qreal next_x = line.cursorToX(request.cursor_position + 1);
         if (const int width = static_cast<int>(std::round(next_x - current_x)); width > 0) {
             return width;
         }
     }
 
-    return fallback_width;
+    return request.fallback_width;
 }
 
 }  // namespace
@@ -50,9 +61,9 @@ void prepare_layout(QTextLayout &layout) {
 EditorScrollArea::EditorScrollArea(TextBuffer buffer, QWidget *parent)
     : QAbstractScrollArea(parent)
     , buffer_(std::move(buffer))
-    , cursor_(CursorPos{
+    , cursor_(ByteCursorPos{
           .line = LineIndex{},
-          .column = ColumnIndex{},
+          .column = ByteColumn{},
       }) {
     setWindowTitle(QStringLiteral("Vitality"));
     setFocusPolicy(Qt::StrongFocus);
@@ -64,7 +75,7 @@ EditorScrollArea::EditorScrollArea(TextBuffer buffer, QWidget *parent)
 }
 
 void EditorScrollArea::keyPressEvent(QKeyEvent *event) {
-    CursorPos next_cursor = cursor_;
+    ByteCursorPos next_cursor = cursor_;
 
     switch (event->key()) {
     case Qt::Key_Up:
@@ -129,15 +140,15 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
             break;
         }
 
-        const auto [utf8_text] = buffer_.line_text(LineIndex{line_index});
-        const QString line_string = utf8_to_qstring(utf8_text);
+        const LineText line_text = buffer_.line_text(LineIndex{line_index});
+        const QString line_string = utf8_to_qstring(line_text.utf8_text);
         QTextLayout layout(line_string, font());
         prepare_layout(layout);
         layout.draw(&painter, QPointF(-horizontal_offset_pixels, y));
 
         if (line_index == cursor_.line.value) {
             const auto [qt_cursor_position, aligned_byte_column] =
-                map_utf8_byte_column_to_qt_cursor(utf8_text, cursor_.column);
+                map_utf8_byte_column_to_qt_cursor(line_text.utf8_text, cursor_.column);
             // We expect a single laid-out line here, but keep the invalid case guarded so an
             // empty or unexpectedly failed layout cannot crash cursor painting.
             const QTextLine layout_line = layout.lineCount() > 0 ? layout.lineAt(0) : QTextLine();
@@ -146,9 +157,11 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
                 : -horizontal_offset_pixels;
             const int cursor_width = block_cursor_width(
                 layout_line,
-                qt_cursor_position,
-                line_string.size(),
-                fallback_cursor_width);
+                BlockCursorWidthRequest{
+                    .cursor_position = qt_cursor_position,
+                    .text_length = static_cast<int>(line_string.size()),
+                    .fallback_width = fallback_cursor_width,
+                });
 
             QRect cursor_rect(
                 static_cast<int>(std::round(cursor_x)),
@@ -253,7 +266,7 @@ void EditorScrollArea::ensure_cursor_visible() const {
     }
 }
 
-void EditorScrollArea::move_cursor(const CursorPos cursor) {
+void EditorScrollArea::move_cursor(const ByteCursorPos cursor) {
     cursor_ = buffer_.clamp_cursor(cursor);
     refresh_scrollbars();
     ensure_cursor_visible();

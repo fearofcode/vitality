@@ -58,6 +58,7 @@ This project should lean toward domain-driven design. Model important concepts a
 - If needed, introduce a dedicated `unicode` module that abstracts the underlying library choice and exposes narrow domain-oriented operations to the rest of the system.
 - Prefer layering Unicode-aware behavior on top of the buffer through explicit types and conversion functions rather than baking library-specific logic directly into buffer internals.
 - Keep the rest of the codebase insulated from library-specific Unicode APIs as much as practical.
+- For staged Unicode and bidirectional text work, see `docs/unicode-roadmap.md`.
 
 ## Public API expectations
 
@@ -124,6 +125,23 @@ If a richer error type is warranted, use one.
 - 100% coverage is not required, but untested behavior should be the exception, not the default.
 - Run the test suite after each change when possible.
 - Run `clang-tidy` after each change when possible.
+- Prefer the project command that uses the compile database and the checked-in `.clang-tidy` config so diagnostics are concrete and consistent:
+
+```bash
+/opt/homebrew/opt/llvm/bin/run-clang-tidy \
+  -p build \
+  -quiet \
+  -source-filter="^$(pwd)/(src|tests|benchmarks)/" \
+  -header-filter="^$(pwd)/(src|tests|benchmarks)/" \
+  -exclude-header-filter="^$(pwd)/build/" \
+  "^$(pwd)/(src|tests|benchmarks)/"
+```
+
+- If you need a one-off focused run for a single translation unit, use:
+
+```bash
+clang-tidy -p build path/to/file.cpp
+```
 
 ## Refactoring expectations
 

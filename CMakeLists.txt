@@ -45,6 +45,8 @@ target_include_directories(vitality_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
 
 add_library(vitality_buffer STATIC
     src/buffer/BufferTypes.h
+    src/buffer/internal/ImplicitTreapStorageCore.cpp
+    src/buffer/internal/ImplicitTreapStorageCore.h
     src/buffer/TextStorage.cpp
     src/buffer/TextStorage.h
     src/buffer/TextBuffer.cpp
@@ -55,6 +57,13 @@ add_library(vitality_buffer STATIC
 target_compile_features(vitality_buffer PUBLIC cxx_std_20)
 target_include_directories(vitality_buffer PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(vitality_buffer PUBLIC vitality_core)
+
+add_executable(vitality_text_storage_bench
+    benchmarks/text_storage_bench.cpp
+)
+target_compile_features(vitality_text_storage_bench PRIVATE cxx_std_20)
+target_include_directories(vitality_text_storage_bench PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(vitality_text_storage_bench PRIVATE vitality_buffer vitality_core)
 
 add_library(vitality_ui STATIC
     src/ui/EditorScrollArea.cpp
@@ -101,7 +110,10 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(Catch2 rapidcheck)
 
     add_executable(vitality_tests
+        tests/property/TextStorageEditPropertyTests.cpp
+        tests/property/TextStoragePropertyTests.cpp
         tests/property/TextBufferPropertyTests.cpp
+        tests/unit/ImplicitTreapStorageCoreTests.cpp
         tests/unit/TextStorageTests.cpp
         tests/unit/TextBufferTests.cpp
     )

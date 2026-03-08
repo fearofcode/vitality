@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -28,6 +29,27 @@ namespace {
     return std::max(visible_lines.value - 1, 1);
 }
 
+[[nodiscard]] std::string read_stream_bytes(std::istream &input) {
+    return std::string(
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>());
+}
+
+[[nodiscard]] std::string normalize_file_newlines(const std::string_view bytes) {
+    std::string normalized;
+    normalized.reserve(bytes.size());
+
+    for (std::size_t index = 0; index < bytes.size(); ++index) {
+        const char ch = bytes[index];
+        if (ch == '\r' && index + 1 < bytes.size() && bytes[index + 1] == '\n') {
+            continue;
+        }
+        normalized.push_back(ch);
+    }
+
+    return normalized;
+}
+
 }  // namespace
 
 TextBuffer TextBuffer::make_empty() {
@@ -44,7 +66,8 @@ BufferLoadResult TextBuffer::load_from_path(const FilePath &path) {
         };
     }
 
-    auto impl = std::make_unique<Impl>(TextStorage::load_from_stream(input));
+    const std::string file_bytes = read_stream_bytes(input);
+    auto impl = std::make_unique<Impl>(TextStorage::from_utf8(normalize_file_newlines(file_bytes)));
     impl->file_path = path;
     impl->display_name = path.display_name();
 
@@ -76,84 +99,84 @@ std::string_view TextBuffer::display_name() const {
     return impl_->display_name;
 }
 
-LineTextView TextBuffer::line_text(const LineIndex line) const {
+LineText TextBuffer::line_text(const LineIndex line) const {
     return impl_->storage.line_text(line);
 }
 
-ColumnIndex TextBuffer::line_length(const LineIndex line) const {
+ByteColumn TextBuffer::line_length(const LineIndex line) const {
     return impl_->storage.line_length(line);
 }
 
-CursorPos TextBuffer::clamp_cursor(const CursorPos cursor) const {
+ByteCursorPos TextBuffer::clamp_cursor(const ByteCursorPos cursor) const {
     return impl_->storage.clamp_cursor(cursor);
 }
 
-CursorPos TextBuffer::move_left(const CursorPos cursor) const {
+ByteCursorPos TextBuffer::move_left(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
-    return CursorPos{
+    return ByteCursorPos{
         .line = line,
-        .column = ColumnIndex{std::max(column.value - 1, 0)},
+        .column = ByteColumn{std::max(column.value - 1, 0)},
     };
 }
 
-CursorPos TextBuffer::move_right(const CursorPos cursor) const {
+ByteCursorPos TextBuffer::move_right(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
     const int max_column = line_length(line).value;
-    return CursorPos{
+    return ByteCursorPos{
         .line = line,
-        .column = ColumnIndex{std::min(column.value + 1, max_column)},
+        .column = ByteColumn{std::min(column.value + 1, max_column)},
     };
 }
 
-CursorPos TextBuffer::move_up(const CursorPos cursor) const {
+ByteCursorPos TextBuffer::move_up(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
     const int target_line = std::max(line.value - 1, 0);
-    return clamp_cursor(CursorPos{
+    return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,
     });
 }
 
-CursorPos TextBuffer::move_down(const CursorPos cursor) const {
+ByteCursorPos TextBuffer::move_down(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
     const int last_line = line_count().value - 1;
     const int target_line = std::min(line.value + 1, last_line);
-    return clamp_cursor(CursorPos{
+    return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,
     });
 }
 
-CursorPos TextBuffer::move_page_up(const CursorPos cursor, const VisibleLineCount visible_lines) const {
+ByteCursorPos TextBuffer::move_page_up(const ByteCursorPos cursor, const VisibleLineCount visible_lines) const {
     const auto [line, column] = clamp_cursor(cursor);
     const int target_line = std::max(line.value - page_move_delta(visible_lines), 0);
-    return clamp_cursor(CursorPos{
+    return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,
     });
 }
 
-CursorPos TextBuffer::move_page_down(const CursorPos cursor, const VisibleLineCount visible_lines) const {
+ByteCursorPos TextBuffer::move_page_down(const ByteCursorPos cursor, const VisibleLineCount visible_lines) const {
     const auto [line, column] = clamp_cursor(cursor);
     const int last_line = line_count().value - 1;
     const int target_line = std::min(line.value + page_move_delta(visible_lines), last_line);
-    return clamp_cursor(CursorPos{
+    return clamp_cursor(ByteCursorPos{
         .line = LineIndex{target_line},
         .column = column,
     });
 }
 
-CursorPos TextBuffer::move_home(const CursorPos cursor) const {
+ByteCursorPos TextBuffer::move_home(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
-    return CursorPos{
+    return ByteCursorPos{
         .line = line,
-        .column = ColumnIndex{},
+        .column = ByteColumn{},
     };
 }
 
-CursorPos TextBuffer::move_end(const CursorPos cursor) const {
+ByteCursorPos TextBuffer::move_end(const ByteCursorPos cursor) const {
     const auto [line, column] = clamp_cursor(cursor);
-    return CursorPos{
+    return ByteCursorPos{
         .line = line,
         .column = line_length(line),
     };

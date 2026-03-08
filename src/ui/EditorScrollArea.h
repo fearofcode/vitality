@@ -29,10 +29,10 @@ private:
 
     void refresh_scrollbars() const;
     void ensure_cursor_visible() const;
-    void move_cursor(CursorPos cursor);
+    void move_cursor(ByteCursorPos cursor);
 
     TextBuffer buffer_;
-    CursorPos cursor_;
+    ByteCursorPos cursor_;
     int SYSTEM_FONT_SIZE_PT = 18;
     int STATUS_BAR_INSET = 6;
 };

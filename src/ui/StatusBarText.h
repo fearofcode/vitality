@@ -7,6 +7,6 @@
 
 namespace vitality {
 
-[[nodiscard]] QString make_status_bar_text(const TextBuffer &buffer, CursorPos cursor);
+[[nodiscard]] QString make_status_bar_text(const TextBuffer &buffer, ByteCursorPos cursor);
 
 }  // namespace vitality
