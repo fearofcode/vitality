@@ -127,22 +127,25 @@ If a richer error type is warranted, use one.
 - 100% coverage is not required, but untested behavior should be the exception, not the default.
 - Run the test suite after each change when possible.
 - Run `clang-tidy` after each change when possible.
-- Prefer the project command that uses the compile database and the checked-in `.clang-tidy` config so diagnostics are concrete and consistent:
+- Prefer the project command that uses a no-PCH compile database plus the
+  checked-in `.clang-tidy` config so diagnostics are concrete and do not fight
+  compiler-specific precompiled header artifacts:
 
 ```bash
+cmake -S . -B build-clang-tidy -DVITALITY_ENABLE_PCH=OFF
 /opt/homebrew/opt/llvm/bin/run-clang-tidy \
-  -p build \
+  -p build-clang-tidy \
   -quiet \
   -source-filter="^$(pwd)/(src|tests|benchmarks)/" \
   -header-filter="^$(pwd)/(src|tests|benchmarks)/" \
-  -exclude-header-filter="^$(pwd)/build/" \
+  -exclude-header-filter="^$(pwd)/(build|build-clang-tidy)/" \
   "^$(pwd)/(src|tests|benchmarks)/"
 ```
 
 - If you need a one-off focused run for a single translation unit, use:
 
 ```bash
-clang-tidy -p build path/to/file.cpp
+clang-tidy -p build-clang-tidy path/to/file.cpp
 ```
 
 ## Refactoring expectations

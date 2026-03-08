@@ -78,21 +78,37 @@ private:
     };
 
     struct RecentContiguousEdit {
-        // Tracks a single add-backed piece that represents the user's current
-        // "typing run". This is intentionally narrow: if we cannot prove that
-        // later edits still refer to this exact piece, we invalidate the
-        // tracker and fall back to the generic treap mutation path.
+        // Tracks one very specific "recent typing run" inside the piece table.
+        //
+        // Example:
+        //   original text: "hello world"
+        //   user moves into the middle and types "abc"
+        //
+        // After the first insert, the document may look like:
+        //   [original "hello "] [add "a"] [original "world"]
+        //
+        // After the next two inserts, we want the cheap path to keep extending
+        // that same add-backed piece instead of creating:
+        //   [original "hello "] [add "a"] [add "b"] [add "c"] [original "world"]
+        //
+        // This tracker remembers exactly which add-backed piece currently
+        // represents "the thing the user is in the middle of typing". The
+        // tracker is intentionally fragile: if we cannot prove that a later
+        // insert/erase still refers to that exact piece, we clear it and fall
+        // back to the generic treap mutation code.
         bool active = false;
-        // Document byte offset where the tracked piece begins.
+        // Document byte offset where that tracked piece begins.
         std::size_t piece_doc_start = 0;
         // Offset into storage_.add where the tracked piece begins.
         std::size_t piece_add_start = 0;
-        // Current full length of the tracked piece in document/add-buffer
-        // bytes.
+        // Current full length of the tracked piece. This is the whole piece,
+        // not just the newest bytes typed into it.
         std::size_t piece_length = 0;
-        // Suffix of the tracked piece that belongs to the most recent
-        // contiguous typing run. Immediate backspace is only allowed to trim
-        // bytes from this suffix.
+        // Suffix of that piece that belongs to the current contiguous typing
+        // run. This is narrower than piece_length because the tracked piece may
+        // already contain older bytes. Immediate backspace is only allowed to
+        // trim from this suffix, because that is the only region we know is
+        // safe to shrink without changing earlier document structure.
         std::size_t typed_suffix_length = 0;
     };
 
@@ -104,7 +120,37 @@ private:
     [[nodiscard]] static std::size_t node_bytes(const std::unique_ptr<Node> &node);
     [[nodiscard]] static std::size_t node_newlines(const std::unique_ptr<Node> &node);
     [[nodiscard]] static std::size_t node_count(const std::unique_ptr<Node> &node);
+    // Return the first piece in document order inside this subtree.
+    //
+    // Why this exists:
+    // after a split we often have two subtrees that represent adjacent
+    // document ranges:
+    //   left_tree  = everything before some boundary
+    //   right_tree = everything after that boundary
+    //
+    // When we glue them back together, the only possible new merge opportunity
+    // is at the outer edge between those two trees. We do not need to inspect
+    // every piece in right_tree; we only need to know which piece starts
+    // right_tree in document order.
+    //
+    // This helper gives us that read-only answer cheaply, before we decide
+    // whether a more expensive detach/rewrite step is necessary.
     [[nodiscard]] static const Node *leftmost_node(const std::unique_ptr<Node> &node);
+    // Return the last piece in document order inside this subtree.
+    //
+    // This is the symmetric helper for the left side of a split. In the common
+    // mutation case we ask:
+    //   "what piece currently ends exactly at this document boundary?"
+    //
+    // Examples:
+    // - before joining left_tree and right_tree back together, we check whether
+    //   the last piece of left_tree and first piece of right_tree can coalesce
+    // - before extending a recent typing run, we check whether the piece that
+    //   ends at the cursor is the exact add-backed piece the tracker expects
+    //
+    // Again, the value here is not that "rightmost node in a tree" is exotic;
+    // it is that these optimization paths need a cheap boundary probe before
+    // deciding whether to rewrite any tree structure at all.
     [[nodiscard]] static const Node *rightmost_node(const std::unique_ptr<Node> &node);
 
     [[nodiscard]] std::size_t count_piece_newlines(const Piece &piece) const;
@@ -112,7 +158,7 @@ private:
     [[nodiscard]] std::unique_ptr<Node> make_node(Piece piece);
     [[nodiscard]] std::unique_ptr<Node> make_node_with_priority(Piece piece, std::uint64_t priority) const;
     [[nodiscard]] std::unique_ptr<Node> make_node_with_offsets(
-        Piece piece,
+        const Piece &piece,
         std::uint64_t priority,
         std::vector<std::size_t> newline_offsets) const;
     [[nodiscard]] std::size_t find_byte_after_nth_newline(
@@ -126,20 +172,48 @@ private:
     [[nodiscard]] static std::pair<Piece, Piece> split_piece_at(const Piece &piece, std::size_t local_offset);
     [[nodiscard]] static bool can_coalesce_pieces(const Piece &left, const Piece &right);
     [[nodiscard]] static Piece coalesce_pieces(const Piece &left, const Piece &right);
-    // Remove and return the first in-document node from a subtree along with
-    // the remaining tree. We use this when a join only needs to inspect or
-    // rewrite the boundary node instead of traversing the whole subtree.
+    // Remove and return the first piece in document order, plus the remaining
+    // subtree.
+    //
+    // This is the "we now know we really do need to touch the boundary piece"
+    // companion to leftmost_node(). The read-only helper lets us cheaply ask
+    // whether the boundary matters; detach_leftmost() is what we use once we
+    // have decided to actually rewrite that first piece.
+    //
+    // Typical use:
+    //   1. inspect the first piece of right_tree
+    //   2. decide it can merge with the piece to its left
+    //   3. detach that first node so we can replace it or combine it
     [[nodiscard]] std::pair<std::unique_ptr<Node>, std::unique_ptr<Node>> detach_leftmost(
         std::unique_ptr<Node> root);
-    // Remove and return the last in-document node from a subtree along with
-    // the remaining tree. This is the symmetric helper used when a mutation
-    // needs direct access to the piece that ends at a split boundary.
+    // Remove and return the last piece in document order, plus the remaining
+    // subtree.
+    //
+    // This is used in the symmetric situations on the left side of a split:
+    //   - get the exact piece that ends at a document boundary
+    //   - mutate or shrink that one piece
+    //   - merge the remaining tree back together
+    //
+    // Recent-typing fast paths depend on this because they need the exact
+    // boundary node, not just knowledge that "some boundary piece exists".
     [[nodiscard]] std::pair<std::unique_ptr<Node>, std::unique_ptr<Node>> detach_rightmost(
         std::unique_ptr<Node> root);
-    // Join two trees that already represent adjacent document ranges. Most of
-    // the time this is just an ordinary treap merge, but if the boundary pieces
-    // refer to adjacent spans in the same backing store we collapse them into a
-    // single piece while stitching the trees together.
+    // Join two trees that already represent adjacent document ranges.
+    //
+    // Without this helper, a mutation would often:
+    //   1. split the tree
+    //   2. modify something local
+    //   3. merge the trees back
+    //   4. run a second cleanup pass to see whether the newly adjacent boundary
+    //      pieces can be collapsed into one piece
+    //
+    // This helper folds steps 3 and 4 together. It looks only at the one
+    // boundary that could have changed:
+    //   last piece of left tree  +  first piece of right tree
+    //
+    // If those two pieces are adjacent spans in the same backing buffer, it
+    // replaces them with one combined piece while performing the join.
+    // Otherwise it falls back to a normal treap merge.
     [[nodiscard]] std::unique_ptr<Node> join_with_boundary_coalescing(
         std::unique_ptr<Node> left,
         std::unique_ptr<Node> right);
@@ -149,17 +223,47 @@ private:
         std::size_t piece_add_start,
         std::size_t piece_length,
         std::size_t typed_suffix_length);
-    // Fast path for "type another byte at the same place". We still have to
-    // touch the treap because the tracked piece can live inside the middle of
-    // the document, so we must isolate that exact node before extending it.
+    // Fast path for "the user typed another byte immediately after the last
+    // byte they just typed".
+    //
+    // The desired effect is:
+    //   old: [original left] [add "abc"] [original right]
+    //   new: [original left] [add "abcd"] [original right]
+    //
+    // rather than creating a fresh add piece for every byte.
+    //
+    // We still have to do local treap work because that tracked add-backed
+    // piece may live in the middle of the document. The helper:
+    //   - verifies that the insertion point is exactly at the end of the
+    //     tracked piece
+    //   - isolates that exact node from the tree
+    //   - extends its length in place
+    //   - joins the surrounding trees back together
+    //
+    // If any of those assumptions fail, it returns false and the caller falls
+    // back to the generic insert path.
     [[nodiscard]] bool try_extend_recent_contiguous_insert(ByteOffset offset, std::string_view utf8_text);
-    // Fast path for immediate backspace over recently typed bytes. This is
-    // intentionally narrower than generic erase: it only trims the suffix that
-    // we know belongs to the current typing run.
+    // Fast path for immediate backspace over the bytes that were just typed.
+    //
+    // This is intentionally much narrower than generic erase. It handles only:
+    //   "remove bytes from the end of the currently tracked typed suffix"
+    //
+    // In other words, it is for the common editor action:
+    //   type type type backspace backspace
+    //
+    // It is not for arbitrary deletion elsewhere in the document. If the erase
+    // range is not exactly the suffix we know how to shrink safely, the helper
+    // returns false and the caller uses the generic split/remove/join path.
     [[nodiscard]] bool try_erase_recent_typed_suffix(ByteRange range);
-    // Extend one existing add-backed piece with newly appended bytes instead of
-    // creating a fresh node. Newline offsets are updated incrementally so we do
-    // not have to rescan the whole piece payload after each typed byte.
+    // Grow an already isolated add-backed node by treating the new bytes as a
+    // suffix of that same piece.
+    //
+    // This is the low-level helper used once the fast path has already proven:
+    //   "yes, this exact node is the one we want to extend"
+    //
+    // It updates both the piece length and the cached newline offsets only for
+    // the new suffix, so we avoid rescanning the entire piece contents after
+    // each typed character.
     void extend_tail_node_with_inserted_suffix(Node *tail, std::string_view inserted_text);
     void collect_pieces_in_order(const Node *node, std::vector<Piece> &out) const;
     void rebuild_from_piece_sequence(const std::vector<Piece> &pieces);

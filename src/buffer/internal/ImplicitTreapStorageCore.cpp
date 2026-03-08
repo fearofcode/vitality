@@ -145,7 +145,7 @@ std::unique_ptr<ImplicitTreapStorageCore::Node> ImplicitTreapStorageCore::make_n
 }
 
 std::unique_ptr<ImplicitTreapStorageCore::Node> ImplicitTreapStorageCore::make_node_with_offsets(
-    const Piece piece,
+    const Piece &piece,
     const std::uint64_t priority,
     std::vector<std::size_t> newline_offsets) const {
     auto node = std::make_unique<Node>();
@@ -385,29 +385,99 @@ bool ImplicitTreapStorageCore::try_extend_recent_contiguous_insert(
         return false;
     }
 
-    // The new bytes must be appended to storage_.add before we can extend the
-    // tracked piece, because a piece-table piece is defined as a span into one
-    // of the backing buffers. Extending the piece means increasing its length
-    // so it covers bytes that already exist in the add buffer.
-    storage_.add.insert(storage_.add.end(), utf8_text.begin(), utf8_text.end());
-
-    // Even on the fast path we still split the tree: the tracked add-backed
-    // piece may sit in the middle of the document, so we need to isolate the
-    // exact node that ends at this insertion point before we can safely mutate
-    // it in place.
+    // Even on the fast path we still split the tree.
+    //
+    // A tempting design would be: store a Node* in RecentContiguousEdit and,
+    // when the user types another byte, just dereference that pointer and
+    // increment piece.length.
+    //
+    // We do not do that because treap mutations routinely move, replace, or
+    // destroy nodes:
+    // - split_by_offset() can replace one node with two new piece nodes
+    // - join/coalescing can remove two boundary nodes and replace them with one
+    // - compaction can rebuild the tree from a new piece sequence
+    //
+    // Now at this point you might be thinking "well just do like this":
+    //
+    //     if (recent_contiguous_edit_.node != null &&
+    //        recent_contiguous_edit_.node->start + recent_contiguous_edit_.node->length + 1 == byte_offset) {
+    //         storage_.add.insert(storage_.add.end(), utf8_text.begin(), utf8_text.end());
+    //         recent_contiguous_edit_.node->length++; // ha ha! we are so smart!
+    //         return true;
+    //     } else {
+    //         recent_contiguous_edit_.node = null;
+    //         return false;
+    //     }
+    //
+    // Yes, if we made sure to invalidate recent_contiguous_edit_.node properly. But we'd also have to update the node's
+    // ancestors' subtree counts which would require either a parent pointer or a path to the node that would also have
+    // to be properly invalidated. This breaks our conceptual ownership model that a node owns its subtree unless we use
+    // raw pointers and introduces new potential bugs around stale parent pointers.
+    //
+    // This code path still avoids allocating a new piece that would have to be coalesced.
+    //
+    // So a cached pointer would be fragile and easy to turn into a dangling or
+    // stale reference. The tracker therefore stores the *logical identity* of
+    // the recent piece (where it starts in the document, where it starts in the
+    // add buffer, and how long it is), not a direct pointer to a mutable node.
+    // We then rediscover the current node from tree structure at the moment we
+    // need to edit it. The tracked add-backed piece may currently be surrounded
+    // by other pieces:
+    //   [original left] [tracked add piece] [original or add right]
+    //
+    // The tree is organized by document order plus treap priorities, not by
+    // "give me the node that ends at offset N". Splitting at the insertion
+    // point turns the problem into:
+    //   left_tree = everything up to the cursor
+    //   right_tree = everything after the cursor
+    //
+    // If the tracker is still correct, the tracked piece must now be the
+    // rightmost node of left_tree.
+    //
+    // Why:
+    // - the insertion point is required to be exactly at the end of the
+    //   tracked piece
+    // - split_by_offset(root_, byte_offset) puts every byte strictly before or
+    //   at that insertion point into left_tree
+    // - everything after that insertion point goes into right_tree
+    //
+    // So after the split, the piece that ends exactly at the insertion point
+    // is the last piece in document order inside left_tree. If some other node
+    // appears there instead, then our tracker no longer describes the current
+    // tree shape correctly.
+    //
+    // Detaching that one boundary node gives us the exact current node to
+    // extend, without assuming an old pointer is still valid.
     auto [left_tree, right_tree] = split_by_offset(std::move(root_), byte_offset);
     auto [left_tail, left_rest] = detach_rightmost(std::move(left_tree));
     if (!left_tail ||
         left_tail->piece.buffer != BufferKind::Add ||
         left_tail->piece.start != recent_contiguous_edit_.piece_add_start ||
         left_tail->piece.length != recent_contiguous_edit_.piece_length) {
-        // The tracker was stale or ambiguous. Rebuild the original tree shape
-        // and fall back to the generic insertion path rather than guessing.
+        // The tracker was stale or ambiguous.
+        //
+        // Examples:
+        // - another edit changed the surrounding document structure
+        // - the tracked piece got merged, split, or removed
+        // - the cursor offset still looks plausible, but the boundary node we
+        //   found is not the exact add-backed piece the tracker describes
+        //
+        // At that point we no longer have enough information to say "extend
+        // this node in place" safely. Put the tree back together exactly as it
+        // was, clear the tracker, and let the generic insert path rediscover
+        // the correct structure.
         auto rebuilt_left = merge(std::move(left_rest), std::move(left_tail));
         root_ = merge(std::move(rebuilt_left), std::move(right_tree));
         clear_recent_contiguous_edit();
         return false;
     }
+
+    // Now that we have proven we are holding the exact tracked add-backed node,
+    // append the new bytes to storage_.add and then extend the piece to cover
+    // them. Doing this after validation avoids leaving dead bytes behind in the
+    // add buffer when the tracker turns out to be stale and we have to fall
+    // back to the generic insert path.
+    storage_.add.insert(storage_.add.end(), utf8_text.begin(), utf8_text.end());
 
     extend_tail_node_with_inserted_suffix(left_tail.get(), utf8_text);
     pull(left_tail.get());
@@ -596,7 +666,7 @@ void ImplicitTreapStorageCore::insert(const ByteOffset offset, const std::string
     const std::size_t add_start = storage_.add.size();
     storage_.add.insert(storage_.add.end(), utf8_text.begin(), utf8_text.end());
 
-    Piece piece{
+    const Piece piece{
         .buffer = BufferKind::Add,
         .start = add_start,
         .length = utf8_text.size(),
@@ -634,7 +704,7 @@ void ImplicitTreapStorageCore::insert(const ByteOffset offset, const std::string
     auto with_insert = join_with_boundary_coalescing(std::move(left_tree), make_node(piece));
     root_ = join_with_boundary_coalescing(std::move(with_insert), std::move(right_tree));
 
-    if (coalesces_left && !coalesces_right) {
+    if (left_tail_view != nullptr && coalesces_left && !coalesces_right) {
         record_recent_add_piece(
             byte_offset - left_tail_view->piece.length,
             left_tail_view->piece.start,

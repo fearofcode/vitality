@@ -2,6 +2,7 @@
 
 # CMake and local build outputs
 /build/
+/build-clang-tidy/
 /cmake-build-debug/
 /cmake-build-release/
 
