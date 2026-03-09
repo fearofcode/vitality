@@ -304,6 +304,8 @@ if(VITALITY_ENABLE_PCH)
 endif()
 
 add_library(vitality_ui STATIC
+    src/ui/EditorNavigationModel.cpp
+    src/ui/EditorNavigationModel.h
     src/ui/EditorScrollArea.cpp
     src/ui/EditorScrollArea.h
     src/ui/StatusBarText.cpp

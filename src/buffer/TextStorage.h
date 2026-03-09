@@ -25,8 +25,8 @@ public:
     [[nodiscard]] LineCount line_count() const;
     [[nodiscard]] LineText line_text(LineIndex line) const;
     [[nodiscard]] ByteColumn line_length(LineIndex line) const;
-    // Cursor construction remains byte-based in Stage 2. These helpers keep
-    // that fact explicit until stronger cursor types start being produced.
+    // Cursor construction remains byte-based. This helper keeps that fact
+    // explicit while stronger cursor types are represented separately.
     [[nodiscard]] ByteColumn clamp_line_byte_column(LineIndex line, ByteColumn column) const;
     [[nodiscard]] ByteCursorPos clamp_cursor(ByteCursorPos cursor) const;
     [[nodiscard]] std::string text() const;

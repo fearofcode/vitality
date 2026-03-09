@@ -38,7 +38,7 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("QtLineLayout forces the Stage 7 code-editor line layout policy") {
+TEST_CASE("QtLineLayout forces the code-editor line layout policy") {
     (void)test_application();
 
     QTextLayout layout(QString::fromUtf8("// السلام"), QFontDatabase::systemFont(QFontDatabase::FixedFont));

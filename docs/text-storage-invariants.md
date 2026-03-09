@@ -36,14 +36,14 @@ the current treap-backed piece table to something else later, but the storage
 boundary can stay stable if we keep the public contract focused on storage facts
 rather than internal mechanics.
 
-Stage 6 of the Unicode roadmap makes that separation even more explicit. The
-distinction between logical cursor semantics, future visual cursor semantics,
-and editor navigation policy lives above storage. `TextStorage` still knows
-nothing about logical-versus-visual cursor behavior, and that is intentional.
+That separation is explicit in the current code. The distinction between
+logical cursor semantics, future visual cursor semantics, and editor navigation
+policy lives above storage. `TextStorage` still knows nothing about
+logical-versus-visual cursor behavior, and that is intentional.
 
-Stage 7 keeps that same boundary. Visual cursor behavior for bidirectional
-code-editor lines lives above storage and above the logical buffer API, in the
-layout/view boundary where rendered line order is actually known.
+Visual cursor behavior for bidirectional code-editor lines lives above storage
+and above the logical buffer API, in the layout/view boundary where rendered
+line order is actually known.
 
 ## 2. What the internal data structure actually is
 

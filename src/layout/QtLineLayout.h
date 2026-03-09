@@ -4,9 +4,9 @@ class QTextLayout;
 
 namespace vitality::layout {
 
-// Stage 7 keeps one shared code-editor line layout policy for both rendering
-// and visual cursor movement. The helper is Qt-dependent on purpose, but the
-// policy itself is narrow:
+// Keep one shared code-editor line layout policy for both rendering and visual
+// cursor movement. The helper is Qt-dependent on purpose, but the policy
+// itself is narrow:
 // - no wrapping
 // - left-to-right code-editor paragraph direction
 // - visual cursor movement semantics inside Qt

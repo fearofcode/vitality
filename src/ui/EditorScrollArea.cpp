@@ -11,6 +11,8 @@
 #include "buffer/BufferTypes.h"
 #include "layout/LayoutCursorOps.h"
 #include "layout/QtLineLayout.h"
+#include "unicode/UnicodeLineOps.h"
+#include "ui/EditorNavigationModel.h"
 #include "ui/StatusBarText.h"
 #include "ui/Utf8QtTextMapper.h"
 
@@ -32,39 +34,6 @@ namespace {
 
 [[nodiscard]] int qt_utf16_column_to_qt_int(const QtUtf16Column column) {
     return clamp_to_qt_int(column.value);
-}
-
-struct VisualNavigationQuery {
-    LineText line_text;
-    layout::VisualCursorQuery query;
-    bool success = false;
-};
-
-[[nodiscard]] std::optional<VisualNavigationQuery> make_visual_navigation_query(
-    const TextBuffer &buffer,
-    const ByteCursorPos cursor) {
-    const auto logical_grapheme = buffer.logical_grapheme_cursor(cursor);
-    if (!logical_grapheme.success) {
-        return std::nullopt;
-    }
-
-    LineText line_text = buffer.line_text(logical_grapheme.cursor.line);
-    return VisualNavigationQuery{
-        .line_text = std::move(line_text),
-        .query = layout::VisualCursorQuery{
-            .line = logical_grapheme.cursor.line,
-            .utf8_line = std::string_view{},
-            .logical_cursor = logical_grapheme.cursor,
-        },
-        .success = true,
-    };
-}
-
-[[nodiscard]] ByteCursorPos byte_cursor_from_logical_grapheme_cursor(const LogicalGraphemeCursorPos cursor) {
-    return ByteCursorPos{
-        .line = cursor.line,
-        .column = ByteColumn{cursor.column.value},
-    };
 }
 
 [[nodiscard]] int ibeam_cursor_width() {
@@ -160,154 +129,58 @@ VisualCursorX EditorScrollArea::preferred_visual_x_value_for_tests() const {
 
 void EditorScrollArea::set_cursor_for_tests(const ByteCursorPos cursor) {
     move_cursor(cursor);
-    clear_preferred_column();
-    clear_preferred_visual_x();
+    preferred_column_.reset();
+    preferred_visual_x_.reset();
 }
 
 void EditorScrollArea::keyPressEvent(QKeyEvent *event) {
-    ByteCursorPos next_cursor = cursor_;
+    std::optional<NavigationCommand> command;
 
     switch (event->key()) {
-    case Qt::Key_Left: {
-        auto visual_query = make_visual_navigation_query(buffer_, cursor_);
-        if (visual_query.has_value()) {
-            visual_query->query.utf8_line = visual_query->line_text.utf8_text;
-            const auto visual_left = layout::visual_left_cursor(visual_query->query);
-            next_cursor = visual_left.success
-                ? byte_cursor_from_logical_grapheme_cursor(visual_left.logical_cursor)
-                : buffer_.move_left(cursor_);
-        } else {
-            next_cursor = buffer_.move_left(cursor_);
-        }
-        move_cursor(next_cursor);
-        clear_preferred_column();
-        clear_preferred_visual_x();
-        reset_preferred_column_from_cursor();
-        reset_preferred_visual_x_from_cursor();
+    case Qt::Key_Left:
+        command = NavigationCommand::Left;
         break;
-    }
-    case Qt::Key_Right: {
-        auto visual_query = make_visual_navigation_query(buffer_, cursor_);
-        if (visual_query.has_value()) {
-            visual_query->query.utf8_line = visual_query->line_text.utf8_text;
-            const auto visual_right = layout::visual_right_cursor(visual_query->query);
-            next_cursor = visual_right.success
-                ? byte_cursor_from_logical_grapheme_cursor(visual_right.logical_cursor)
-                : buffer_.move_right(cursor_);
-        } else {
-            next_cursor = buffer_.move_right(cursor_);
-        }
-        move_cursor(next_cursor);
-        clear_preferred_column();
-        clear_preferred_visual_x();
-        reset_preferred_column_from_cursor();
-        reset_preferred_visual_x_from_cursor();
+    case Qt::Key_Right:
+        command = NavigationCommand::Right;
         break;
-    }
-    case Qt::Key_Up: {
-        // Vertical navigation preserves the original preferred display column
-        // across shorter intermediate lines. The editor owns that transient
-        // logical navigation state; the buffer only answers line-local mapping
-        // queries. This is still not visual-order cursor behavior in the bidi
-        // sense. The stored cursor remains logical and byte-based.
-        if (!preferred_column_.has_value()) {
-            reset_preferred_column_from_cursor();
-        }
-        if (!preferred_visual_x_.has_value()) {
-            reset_preferred_visual_x_from_cursor();
-        }
-
-        const std::int64_t target_line = std::max<std::int64_t>(cursor_.line.value - 1, 0);
-        next_cursor = move_vertically_with_preferred_column(LineIndex{target_line});
-        move_cursor(next_cursor);
+    case Qt::Key_Up:
+        command = NavigationCommand::Up;
         break;
-    }
-    case Qt::Key_Down: {
-        if (!preferred_column_.has_value()) {
-            reset_preferred_column_from_cursor();
-        }
-        if (!preferred_visual_x_.has_value()) {
-            reset_preferred_visual_x_from_cursor();
-        }
-
-        const std::int64_t last_line = std::max<std::int64_t>(buffer_.line_count().value - 1, 0);
-        const std::int64_t target_line = std::min<std::int64_t>(cursor_.line.value + 1, last_line);
-        next_cursor = move_vertically_with_preferred_column(LineIndex{target_line});
-        move_cursor(next_cursor);
+    case Qt::Key_Down:
+        command = NavigationCommand::Down;
         break;
-    }
-    case Qt::Key_PageUp: {
-        if (!preferred_column_.has_value()) {
-            reset_preferred_column_from_cursor();
-        }
-        if (!preferred_visual_x_.has_value()) {
-            reset_preferred_visual_x_from_cursor();
-        }
-
-        const std::int64_t target_line = std::max<std::int64_t>(
-            cursor_.line.value - std::max<std::int64_t>(visible_line_count().value - 1, 1),
-            0);
-        next_cursor = move_vertically_with_preferred_column(LineIndex{target_line});
-        move_cursor(next_cursor);
+    case Qt::Key_PageUp:
+        command = NavigationCommand::PageUp;
         break;
-    }
-    case Qt::Key_PageDown: {
-        if (!preferred_column_.has_value()) {
-            reset_preferred_column_from_cursor();
-        }
-        if (!preferred_visual_x_.has_value()) {
-            reset_preferred_visual_x_from_cursor();
-        }
-
-        const std::int64_t last_line = std::max<std::int64_t>(buffer_.line_count().value - 1, 0);
-        const std::int64_t target_line = std::min<std::int64_t>(
-            cursor_.line.value + std::max<std::int64_t>(visible_line_count().value - 1, 1),
-            last_line);
-        next_cursor = move_vertically_with_preferred_column(LineIndex{target_line});
-        move_cursor(next_cursor);
+    case Qt::Key_PageDown:
+        command = NavigationCommand::PageDown;
         break;
-    }
-    case Qt::Key_Home: {
-        auto visual_query = make_visual_navigation_query(buffer_, cursor_);
-        if (visual_query.has_value()) {
-            visual_query->query.utf8_line = visual_query->line_text.utf8_text;
-            const auto visual_home = layout::visual_home_cursor(visual_query->query);
-            next_cursor = visual_home.success
-                ? byte_cursor_from_logical_grapheme_cursor(visual_home.logical_cursor)
-                : buffer_.move_home(cursor_);
-        } else {
-            next_cursor = buffer_.move_home(cursor_);
-        }
-        move_cursor(next_cursor);
-        clear_preferred_column();
-        clear_preferred_visual_x();
-        reset_preferred_column_from_cursor();
-        reset_preferred_visual_x_from_cursor();
+    case Qt::Key_Home:
+        command = NavigationCommand::Home;
         break;
-    }
-    case Qt::Key_End: {
-        auto visual_query = make_visual_navigation_query(buffer_, cursor_);
-        if (visual_query.has_value()) {
-            visual_query->query.utf8_line = visual_query->line_text.utf8_text;
-            const auto visual_end = layout::visual_end_cursor(visual_query->query);
-            next_cursor = visual_end.success
-                ? byte_cursor_from_logical_grapheme_cursor(visual_end.logical_cursor)
-                : buffer_.move_end(cursor_);
-        } else {
-            next_cursor = buffer_.move_end(cursor_);
-        }
-        move_cursor(next_cursor);
-        clear_preferred_column();
-        clear_preferred_visual_x();
-        reset_preferred_column_from_cursor();
-        reset_preferred_visual_x_from_cursor();
+    case Qt::Key_End:
+        command = NavigationCommand::End;
         break;
-    }
     default:
         event->ignore();
         return;
     }
 
+    const EditorNavigationModel navigation_model(buffer_);
+    const auto result = navigation_model.navigate(
+        EditorNavigationState{
+            .cursor = cursor_,
+            .preferred_column = preferred_column_,
+            .preferred_visual_x = preferred_visual_x_,
+        },
+        *command,
+        visible_line_count());
+    if (!result.handled) {
+        event->ignore();
+        return;
+    }
+
+    apply_navigation_state(result.state);
     event->accept();
 }
 
@@ -346,7 +219,7 @@ void EditorScrollArea::paintEvent(QPaintEvent *event) {
 
         if (line_index == cursor_.line.value) {
             const auto [qt_utf16_column, aligned_byte_column, mapping_success, mapping_error] =
-                map_utf8_byte_column_to_qt_cursor(line_text.utf8_text, cursor_.column);
+                unicode::map_byte_column_to_qt_utf16(line_text.utf8_text, cursor_.column);
             // We expect a single laid-out line here, but keep the invalid case guarded so an
             // empty or unexpectedly failed layout cannot crash cursor painting.
             const QTextLine layout_line = layout.lineCount() > 0 ? layout.lineAt(0) : QTextLine();
@@ -475,79 +348,10 @@ void EditorScrollArea::move_cursor(const ByteCursorPos cursor) {
     viewport()->update();
 }
 
-PreferredVisualColumn EditorScrollArea::current_preferred_column() const {
-    if (preferred_column_.has_value()) {
-        return *preferred_column_;
-    }
-
-    return buffer_.preferred_column(cursor_);
-}
-
-void EditorScrollArea::reset_preferred_column_from_cursor() {
-    preferred_column_ = buffer_.preferred_column(cursor_);
-}
-
-void EditorScrollArea::clear_preferred_column() {
-    preferred_column_.reset();
-}
-
-std::optional<VisualCursorX> EditorScrollArea::current_preferred_visual_x() const {
-    return preferred_visual_x_;
-}
-
-void EditorScrollArea::reset_preferred_visual_x_from_cursor() {
-    auto visual_query = make_visual_navigation_query(buffer_, cursor_);
-    if (!visual_query.has_value()) {
-        preferred_visual_x_.reset();
-        return;
-    }
-
-    visual_query->query.utf8_line = visual_query->line_text.utf8_text;
-    const auto visual_cursor = layout::logical_to_visual_cursor(visual_query->query);
-    if (!visual_cursor.success) {
-        preferred_visual_x_.reset();
-        return;
-    }
-
-    preferred_visual_x_ = visual_cursor.visual_x;
-}
-
-void EditorScrollArea::clear_preferred_visual_x() {
-    preferred_visual_x_.reset();
-}
-
-ByteCursorPos EditorScrollArea::move_vertically_with_preferred_column(const LineIndex target_line) const {
-    if (const auto preferred_visual_x = current_preferred_visual_x(); preferred_visual_x.has_value()) {
-        const LineText line_text = buffer_.line_text(target_line);
-        const auto visual_target = layout::logical_cursor_for_visual_x(
-            target_line,
-            line_text.utf8_text,
-            *preferred_visual_x);
-        if (visual_target.success) {
-            return ByteCursorPos{
-                .line = visual_target.logical_cursor.line,
-                .column = ByteColumn{visual_target.logical_cursor.column.value},
-            };
-        }
-    }
-
-    const PreferredVisualColumn preferred = current_preferred_column();
-    const auto target_cursor = buffer_.cursor_for_display_column(
-        target_line,
-        GraphemeColumn{preferred.value});
-    if (target_cursor.success) {
-        return ByteCursorPos{
-            .line = target_cursor.cursor.line,
-            .column = ByteColumn{target_cursor.cursor.column.value},
-        };
-    }
-
-    // Malformed UTF-8 or another Unicode mapping failure should not break
-    // navigation. Fall back to the old byte-column model on the target line.
-    return buffer_.clamp_cursor(ByteCursorPos{
-        .line = target_line,
-        .column = cursor_.column,
-    });
+void EditorScrollArea::apply_navigation_state(const EditorNavigationState &state) {
+    preferred_column_ = state.preferred_column;
+    preferred_visual_x_ = state.preferred_visual_x;
+    move_cursor(state.cursor);
 }
 
 }  // namespace vitality

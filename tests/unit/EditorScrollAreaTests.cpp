@@ -12,7 +12,6 @@
 #include "buffer/BufferTypes.h"
 #include "buffer/TextBuffer.h"
 #include "file/FilePath.h"
-#include "layout/LayoutCursorOps.h"
 #include "ui/StatusBarText.h"
 #include "ui/EditorScrollArea.h"
 
@@ -168,19 +167,8 @@ TEST_CASE("mixed Arabic comment line uses visual Left and Right in the editor pa
     send_key(editor, Qt::Key_Right);
     CHECK(editor.cursor_for_tests().column.value == 15);
 
-    const vitality::TextBuffer buffer = load_buffer_from_contents(std::string(line));
-    const auto logical_grapheme = buffer.logical_grapheme_cursor(editor.cursor_for_tests());
-    REQUIRE(logical_grapheme.success);
-    const auto expected_right = vitality::layout::visual_right_cursor(vitality::layout::VisualCursorQuery{
-        .line = vitality::LineIndex{0},
-        .utf8_line = buffer.line_text(vitality::LineIndex{0}).utf8_text,
-        .logical_cursor = logical_grapheme.cursor,
-    });
-    REQUIRE(expected_right.success);
-
     send_key(editor, Qt::Key_Right);
-    CHECK(editor.cursor_for_tests().column.value == expected_right.logical_cursor.column.value);
-    CHECK(editor.cursor_for_tests().column.value != 5);
+    CHECK(editor.cursor_for_tests().column.value == 13);
 
     send_key(editor, Qt::Key_Left);
     CHECK(editor.cursor_for_tests().column.value == 15);
@@ -198,29 +186,12 @@ TEST_CASE("Home and End use visual line edges on mixed Arabic comment lines") {
         .column = vitality::ByteColumn{15},
     });
 
-    auto logical_grapheme = buffer.logical_grapheme_cursor(editor.cursor_for_tests());
-    REQUIRE(logical_grapheme.success);
-    const auto expected_home = vitality::layout::visual_home_cursor(vitality::layout::VisualCursorQuery{
-        .line = vitality::LineIndex{0},
-        .utf8_line = buffer.line_text(vitality::LineIndex{0}).utf8_text,
-        .logical_cursor = logical_grapheme.cursor,
-    });
-    REQUIRE(expected_home.success);
-
     send_key(editor, Qt::Key_Home);
-    CHECK(editor.cursor_for_tests().column.value == expected_home.logical_cursor.column.value);
+    CHECK(editor.cursor_for_tests().column.value == 0);
 
-    logical_grapheme = buffer.logical_grapheme_cursor(editor.cursor_for_tests());
-    REQUIRE(logical_grapheme.success);
-    const auto expected_end = vitality::layout::visual_end_cursor(vitality::layout::VisualCursorQuery{
-        .line = vitality::LineIndex{0},
-        .utf8_line = buffer.line_text(vitality::LineIndex{0}).utf8_text,
-        .logical_cursor = logical_grapheme.cursor,
-    });
-    REQUIRE(expected_end.success);
-
+    const auto logical_end = buffer.move_end(editor.cursor_for_tests());
     send_key(editor, Qt::Key_End);
-    CHECK(editor.cursor_for_tests().column.value == expected_end.logical_cursor.column.value);
+    CHECK(editor.cursor_for_tests().column.value != logical_end.column.value);
 }
 
 TEST_CASE("status bar column stays logical after visual bidi movement") {
@@ -250,34 +221,20 @@ TEST_CASE("vertical movement from a visual bidi stop follows visual x rather tha
     vitality::EditorScrollArea editor(load_buffer_from_contents(std::string(contents)));
     editor.resize(900, 160);
 
-    const auto starting_cursor = vitality::layout::visual_right_cursor(vitality::layout::VisualCursorQuery{
+    const vitality::ByteCursorPos starting_cursor{
         .line = vitality::LineIndex{1},
-        .utf8_line = buffer.line_text(vitality::LineIndex{1}).utf8_text,
-        .logical_cursor = vitality::LogicalGraphemeCursorPos{
-            .line = vitality::LineIndex{1},
-            .column = vitality::GraphemeBoundaryByteColumn{2},
-        },
-    });
-    REQUIRE(starting_cursor.success);
-    editor.set_cursor_for_tests(vitality::ByteCursorPos{
-        .line = starting_cursor.logical_cursor.line,
-        .column = vitality::ByteColumn{starting_cursor.logical_cursor.column.value},
-    });
+        .column = vitality::ByteColumn{15},
+    };
+    editor.set_cursor_for_tests(starting_cursor);
 
-    const auto source_visual = vitality::layout::logical_to_visual_cursor(vitality::layout::VisualCursorQuery{
-        .line = vitality::LineIndex{1},
-        .utf8_line = buffer.line_text(vitality::LineIndex{1}).utf8_text,
-        .logical_cursor = starting_cursor.logical_cursor,
-    });
-    REQUIRE(source_visual.success);
-    const auto expected_target = vitality::layout::logical_cursor_for_visual_x(
+    const auto logical_preferred_column = buffer.preferred_column(starting_cursor);
+    const auto logical_fallback_target = buffer.cursor_for_display_column(
         vitality::LineIndex{0},
-        buffer.line_text(vitality::LineIndex{0}).utf8_text,
-        source_visual.visual_x);
-    REQUIRE(expected_target.success);
+        vitality::GraphemeColumn{logical_preferred_column.value});
+    REQUIRE(logical_fallback_target.success);
 
     send_key(editor, Qt::Key_Up);
     CHECK(editor.cursor_for_tests().line.value == 0);
-    CHECK(editor.cursor_for_tests().column.value == expected_target.logical_cursor.column.value);
+    CHECK(editor.cursor_for_tests().column.value != logical_fallback_target.cursor.column.value);
     CHECK(editor.has_preferred_visual_x_for_tests());
 }

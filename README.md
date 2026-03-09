@@ -26,9 +26,9 @@ cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt
 
 If Qt is already discoverable in your environment, the `-DCMAKE_PREFIX_PATH` argument may not be necessary.
 
-### Stage 3 Unicode dependencies
+### Unicode dependencies
 
-Stage 3 adds explicit ICU and HarfBuzz dependencies. On this machine, the expected Homebrew setup is:
+Vitality uses explicit ICU and HarfBuzz dependencies. On this machine, the expected Homebrew setup is:
 
 ```bash
 brew install qt icu4c harfbuzz

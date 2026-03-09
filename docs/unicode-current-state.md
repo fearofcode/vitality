@@ -4,10 +4,8 @@ This document describes what Vitality's Unicode and bidirectional-text behavior
 actually does today. It is the current source of truth for the editor's Unicode
 and bidi behavior.
 
-At the time of writing, the core Unicode navigation and rendering goals from
-Stages 1 through 7 have been completed. The editor is now a Unicode-aware file
-viewer with logical cursor storage, grapheme-aware text navigation, and
-line-local bidi-aware visual cursor behavior for code-editor lines.
+At the time of writing, the editor is a Unicode-aware file viewer with logical cursor storage, grapheme-aware text 
+navigation, and line-local bidi-aware visual cursor behavior for code-editor lines.
 
 ## Canonical cursor model
 
@@ -64,7 +62,7 @@ remains total and the file stays viewable.
 Vertical movement preserves a persistent preferred column, but that column is no
 longer just a raw byte offset.
 
-The main Stage 5 behavior is still present:
+The main vertical-navigation behavior is:
 
 - `Up`, `Down`, `PageUp`, and `PageDown` preserve a grapheme-based logical
   display column across lines of different lengths
@@ -72,7 +70,7 @@ The main Stage 5 behavior is still present:
   the original preferred column and restores it when later lines are long
   enough
 
-Stage 7 added one important refinement for mixed-direction lines:
+There is one important refinement for mixed-direction lines:
 
 - when line layout can provide a reliable bidi-aware visual x-position, the
   editor also preserves that transient visual x-position across vertical moves

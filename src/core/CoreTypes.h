@@ -66,8 +66,8 @@ struct ByteCursorPos {
 
 // The editor's canonical stored cursor is still logical and byte-based today.
 // ByteCursorPos remains the active production cursor type, while the more
-// explicit Logical* cursor names below are introduced in Stage 6 so later bidi
-// work can stop relying on inference from comments alone.
+// explicit Logical* cursor names below exist so later bidi/layout work does not
+// have to rely on inference from comments alone.
 //
 // In practice ByteCursorPos and LogicalByteCursorPos currently describe the
 // same coordinate space. The difference is documentary: this type says the
@@ -120,9 +120,9 @@ struct LogicalGraphemeCursorPos {
 };
 
 // PreferredVisualColumn stores the editor's persistent target display column
-// for vertical movement. Even after Stage 7 introduces visual cursor services,
-// this type still means the logical grapheme display-column count used by the
-// Stage 5 vertical navigation model, not bidi visual-order position.
+// for vertical movement. Even with visual cursor services, this type still
+// means the logical grapheme display-column count used by the current vertical
+// navigation model, not bidi visual-order position.
 //
 // In other words, this is "where the user wants vertical movement to keep
 // aiming in the logical line's displayed grapheme columns," not "which visual
@@ -140,10 +140,10 @@ struct GraphemeColumn {
     std::int64_t value = 0;
 };
 
-// Visual cursor types are line-local derived layout positions. In Stage 7 a
-// VisualCursorPos means "which visual cursor stop from left to right in this
-// laid-out code-editor line," not a pixel coordinate and not the logical
-// grapheme display-column value shown in the status bar.
+// Visual cursor types are line-local derived layout positions. VisualCursorPos
+// means "which visual cursor stop from left to right in this laid-out
+// code-editor line," not a pixel coordinate and not the logical grapheme
+// display-column value shown in the status bar.
 //
 // VisualCursorColumn is therefore an index into the visual stop ordering of one
 // laid-out line, not into document bytes and not into logical grapheme-count
@@ -154,8 +154,8 @@ struct VisualCursorColumn {
 
 // VisualCursorX is a line-local x coordinate in the laid-out code-editor line.
 // Unlike VisualCursorColumn, this is not "which visual cursor stop" but "where
-// on screen, in line-local pixel space, this logical cursor ended up." Stage 7
-// uses it as transient editor navigation state for vertical movement so bidi
+// on screen, in line-local pixel space, this logical cursor ended up." The
+// editor uses it as transient navigation state for vertical movement so bidi
 // lines can move to what is visually above or below the caret without making
 // the stored cursor itself visual.
 //

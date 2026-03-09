@@ -52,9 +52,9 @@ public:
         LineIndex line,
         ByteColumn column) const;
     [[nodiscard]] ByteCursorPos clamp_cursor(ByteCursorPos cursor) const;
-    // These movement helpers remain logical/document-order helpers. Stage 7
-    // bidi-aware visual keyboard behavior is derived above the buffer in the
-    // layout service plus editor key-handling path.
+    // These movement helpers remain logical/document-order helpers. Bidi-aware
+    // visual keyboard behavior is derived above the buffer in the layout
+    // service plus editor key-handling path.
     [[nodiscard]] ByteCursorPos move_left(ByteCursorPos cursor) const;
     [[nodiscard]] ByteCursorPos move_right(ByteCursorPos cursor) const;
     // Home and End remain logical compatibility helpers. The editor's actual
