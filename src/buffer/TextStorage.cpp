@@ -145,6 +145,13 @@ ByteColumn TextStorage::line_length(const LineIndex line) const {
     return ByteColumn{static_cast<std::int64_t>(range.end - range.start)};
 }
 
+ByteColumn TextStorage::clamp_line_byte_column(const LineIndex line, const ByteColumn column) const {
+    return clamp_cursor(ByteCursorPos{
+        .line = line,
+        .column = column,
+    }).column;
+}
+
 ByteCursorPos TextStorage::clamp_cursor(const ByteCursorPos cursor) const {
     const std::int64_t last_line_index = line_count().value - 1;
     const std::int64_t clamped_line = clamp_int(cursor.line.value, 0, last_line_index);

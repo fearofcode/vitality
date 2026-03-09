@@ -60,7 +60,7 @@ This project should lean toward domain-driven design. Model important concepts a
 - If needed, introduce a dedicated `unicode` module that abstracts the underlying library choice and exposes narrow domain-oriented operations to the rest of the system.
 - Prefer layering Unicode-aware behavior on top of the buffer through explicit types and conversion functions rather than baking library-specific logic directly into buffer internals.
 - Keep the rest of the codebase insulated from library-specific Unicode APIs as much as practical.
-- For staged Unicode and bidirectional text work, see `docs/unicode-roadmap.md`.
+- For the actual Unicode and bidirectional-text behavior the editor implements today, see `docs/unicode-current-state.md`. Prefer that document when deciding whether a behavior is already complete versus still planned.
 
 ## Public API expectations
 

@@ -1,22 +1,8 @@
 #include "ui/Utf8QtTextMapper.h"
 
-#include <algorithm>
+#include "unicode/UnicodeLineOps.h"
 
 namespace vitality {
-
-namespace {
-
-[[nodiscard]] bool is_utf8_continuation_byte(const unsigned char byte) {
-    return (byte & 0xC0U) == 0x80U;
-}
-
-[[nodiscard]] int clamp_byte_column(std::string_view utf8_text, const ByteColumn byte_column) {
-    const auto max_column = static_cast<std::int64_t>(utf8_text.size());
-    const auto clamped = std::clamp<std::int64_t>(byte_column.value, 0, max_column);
-    return static_cast<int>(clamped);
-}
-
-}  // namespace
 
 QString utf8_to_qstring(const std::string_view utf8_text) {
     return QString::fromUtf8(
@@ -27,22 +13,7 @@ QString utf8_to_qstring(const std::string_view utf8_text) {
 QtTextCursorMapping map_utf8_byte_column_to_qt_cursor(
     const std::string_view utf8_text,
     const ByteColumn byte_column) {
-    int aligned_byte_column = clamp_byte_column(utf8_text, byte_column);
-
-    while (aligned_byte_column > 0 &&
-           aligned_byte_column < static_cast<int>(utf8_text.size()) &&
-           is_utf8_continuation_byte(static_cast<unsigned char>(utf8_text[aligned_byte_column]))) {
-        --aligned_byte_column;
-    }
-
-    const QString prefix = QString::fromUtf8(
-        utf8_text.data(),  // NOLINT(bugprone-suspicious-stringview-data-usage)
-        static_cast<qsizetype>(aligned_byte_column));
-
-    return QtTextCursorMapping{
-        .qt_cursor_position = static_cast<int>(prefix.size()),
-        .aligned_byte_column = ByteColumn{aligned_byte_column},
-    };
+    return unicode::map_byte_column_to_qt_utf16(utf8_text, byte_column);
 }
 
 }  // namespace vitality

@@ -11,6 +11,7 @@
 #include "buffer/BufferTypes.h"
 #include "buffer/TextStorage.h"
 #include "file/FilePath.h"
+#include "unicode/UnicodeLineOps.h"
 
 namespace vitality {
 
@@ -28,6 +29,23 @@ namespace {
 
 [[nodiscard]] std::int64_t page_move_delta(const VisibleLineCount visible_lines) {
     return std::max<std::int64_t>(visible_lines.value - 1, 1);
+}
+
+[[nodiscard]] ByteCursorPos move_left_by_byte(const TextBuffer &buffer, const ByteCursorPos cursor) {
+    const auto [line, column] = buffer.clamp_cursor(cursor);
+    return ByteCursorPos{
+        .line = line,
+        .column = ByteColumn{std::max<std::int64_t>(column.value - 1, 0)},
+    };
+}
+
+[[nodiscard]] ByteCursorPos move_right_by_byte(const TextBuffer &buffer, const ByteCursorPos cursor) {
+    const auto [line, column] = buffer.clamp_cursor(cursor);
+    const std::int64_t max_column = buffer.line_length(line).value;
+    return ByteCursorPos{
+        .line = line,
+        .column = ByteColumn{std::min<std::int64_t>(column.value + 1, max_column)},
+    };
 }
 
 [[nodiscard]] std::string read_stream_bytes(std::istream &input) {
@@ -108,67 +126,238 @@ ByteColumn TextBuffer::line_length(const LineIndex line) const {
     return impl_->storage.line_length(line);
 }
 
+LogicalGraphemeCursorResult TextBuffer::logical_grapheme_cursor(const ByteCursorPos cursor) const {
+    const auto aligned = align_cursor_to_grapheme_boundary(cursor);
+    if (!aligned.success) {
+        return LogicalGraphemeCursorResult{
+            .success = false,
+            .error = aligned.error,
+        };
+    }
+
+    return LogicalGraphemeCursorResult{
+        .cursor = LogicalGraphemeCursorPos{
+            .line = aligned.cursor.line,
+            .column = aligned.cursor.column,
+        },
+        .success = true,
+        .error = UnicodeError::None,
+    };
+}
+
+ByteColumnAlignmentResult TextBuffer::align_line_byte_column_to_code_point_boundary(
+    const LineIndex line,
+    const ByteColumn column) const {
+    if (line.value < 0 || line.value >= line_count().value) {
+        return ByteColumnAlignmentResult{
+            .aligned_column = ByteColumn{},
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    return unicode::align_byte_column_to_code_point_boundary(line_text(line).utf8_text, column);
+}
+
+GraphemeBoundaryCursorResult TextBuffer::align_cursor_to_grapheme_boundary(const ByteCursorPos cursor) const {
+    if (cursor.line.value < 0 || cursor.line.value >= line_count().value) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    const ByteCursorPos clamped = clamp_cursor(cursor);
+    const LineIndex line = clamped.line;
+    const auto aligned = unicode::align_byte_column_to_grapheme_boundary(
+        line_text(line).utf8_text,
+        clamped.column);
+    if (!aligned.success) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = aligned.error,
+        };
+    }
+
+    return GraphemeBoundaryCursorResult{
+        .cursor = GraphemeBoundaryCursorPos{
+            .line = line,
+            .column = aligned.column,
+        },
+        .success = true,
+        .error = UnicodeError::None,
+    };
+}
+
+GraphemeBoundaryCursorResult TextBuffer::previous_grapheme_cursor(const ByteCursorPos cursor) const {
+    if (cursor.line.value < 0 || cursor.line.value >= line_count().value) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    const ByteCursorPos clamped = clamp_cursor(cursor);
+    const LineIndex line = clamped.line;
+    const auto previous = unicode::previous_grapheme_boundary(
+        line_text(line).utf8_text,
+        clamped.column);
+    if (!previous.success) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = previous.error,
+        };
+    }
+
+    return GraphemeBoundaryCursorResult{
+        .cursor = GraphemeBoundaryCursorPos{
+            .line = line,
+            .column = previous.column,
+        },
+        .success = true,
+        .error = UnicodeError::None,
+    };
+}
+
+GraphemeBoundaryCursorResult TextBuffer::next_grapheme_cursor(const ByteCursorPos cursor) const {
+    if (cursor.line.value < 0 || cursor.line.value >= line_count().value) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    const ByteCursorPos clamped = clamp_cursor(cursor);
+    const LineIndex line = clamped.line;
+    const auto next = unicode::next_grapheme_boundary(
+        line_text(line).utf8_text,
+        clamped.column);
+    if (!next.success) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = next.error,
+        };
+    }
+
+    return GraphemeBoundaryCursorResult{
+        .cursor = GraphemeBoundaryCursorPos{
+            .line = line,
+            .column = next.column,
+        },
+        .success = true,
+        .error = UnicodeError::None,
+    };
+}
+
+GraphemeColumnResult TextBuffer::display_column(const ByteCursorPos cursor) const {
+    if (cursor.line.value < 0 || cursor.line.value >= line_count().value) {
+        return GraphemeColumnResult{
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    const ByteCursorPos clamped = clamp_cursor(cursor);
+    return unicode::grapheme_column_at_byte_column(
+        line_text(clamped.line).utf8_text,
+        clamped.column);
+}
+
+GraphemeBoundaryCursorResult TextBuffer::cursor_for_display_column(
+    const LineIndex line,
+    const GraphemeColumn column) const {
+    if (line.value < 0 || line.value >= line_count().value) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    const auto boundary = unicode::grapheme_boundary_for_display_column(
+        line_text(line).utf8_text,
+        column);
+    if (!boundary.success) {
+        return GraphemeBoundaryCursorResult{
+            .success = false,
+            .error = boundary.error,
+        };
+    }
+
+    return GraphemeBoundaryCursorResult{
+        .cursor = GraphemeBoundaryCursorPos{
+            .line = line,
+            .column = boundary.column,
+        },
+        .success = true,
+        .error = UnicodeError::None,
+    };
+}
+
+PreferredVisualColumn TextBuffer::preferred_column(const ByteCursorPos cursor) const {
+    const auto column = display_column(cursor);
+    if (column.success) {
+        return PreferredVisualColumn{column.column.value};
+    }
+
+    return PreferredVisualColumn{clamp_cursor(cursor).column.value};
+}
+
+GraphemeBoundarySearchResult TextBuffer::previous_grapheme_boundary(
+    const LineIndex line,
+    const ByteColumn column) const {
+    if (line.value < 0 || line.value >= line_count().value) {
+        return GraphemeBoundarySearchResult{
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    return unicode::previous_grapheme_boundary(line_text(line).utf8_text, column);
+}
+
+GraphemeBoundarySearchResult TextBuffer::next_grapheme_boundary(
+    const LineIndex line,
+    const ByteColumn column) const {
+    if (line.value < 0 || line.value >= line_count().value) {
+        return GraphemeBoundarySearchResult{
+            .success = false,
+            .error = UnicodeError::None,
+        };
+    }
+
+    return unicode::next_grapheme_boundary(line_text(line).utf8_text, column);
+}
+
 ByteCursorPos TextBuffer::clamp_cursor(const ByteCursorPos cursor) const {
     return impl_->storage.clamp_cursor(cursor);
 }
 
 ByteCursorPos TextBuffer::move_left(const ByteCursorPos cursor) const {
-    const auto [line, column] = clamp_cursor(cursor);
+    const auto previous = previous_grapheme_cursor(cursor);
+    if (!previous.success) {
+        return move_left_by_byte(*this, cursor);
+    }
+
     return ByteCursorPos{
-        .line = line,
-        .column = ByteColumn{std::max<std::int64_t>(column.value - 1, 0)},
+        .line = previous.cursor.line,
+        .column = ByteColumn{previous.cursor.column.value},
     };
 }
 
 ByteCursorPos TextBuffer::move_right(const ByteCursorPos cursor) const {
-    const auto [line, column] = clamp_cursor(cursor);
-    const std::int64_t max_column = line_length(line).value;
+    const auto next = next_grapheme_cursor(cursor);
+    if (!next.success) {
+        return move_right_by_byte(*this, cursor);
+    }
+
     return ByteCursorPos{
-        .line = line,
-        .column = ByteColumn{std::min<std::int64_t>(column.value + 1, max_column)},
+        .line = next.cursor.line,
+        .column = ByteColumn{next.cursor.column.value},
     };
 }
 
-ByteCursorPos TextBuffer::move_up(const ByteCursorPos cursor) const {
-    const auto [line, column] = clamp_cursor(cursor);
-    const std::int64_t target_line = std::max<std::int64_t>(line.value - 1, 0);
-    return clamp_cursor(ByteCursorPos{
-        .line = LineIndex{target_line},
-        .column = column,
-    });
-}
-
-ByteCursorPos TextBuffer::move_down(const ByteCursorPos cursor) const {
-    const auto [line, column] = clamp_cursor(cursor);
-    const std::int64_t last_line = line_count().value - 1;
-    const std::int64_t target_line = std::min<std::int64_t>(line.value + 1, last_line);
-    return clamp_cursor(ByteCursorPos{
-        .line = LineIndex{target_line},
-        .column = column,
-    });
-}
-
-ByteCursorPos TextBuffer::move_page_up(const ByteCursorPos cursor, const VisibleLineCount visible_lines) const {
-    const auto [line, column] = clamp_cursor(cursor);
-    const std::int64_t target_line = std::max<std::int64_t>(line.value - page_move_delta(visible_lines), 0);
-    return clamp_cursor(ByteCursorPos{
-        .line = LineIndex{target_line},
-        .column = column,
-    });
-}
-
-ByteCursorPos TextBuffer::move_page_down(const ByteCursorPos cursor, const VisibleLineCount visible_lines) const {
-    const auto [line, column] = clamp_cursor(cursor);
-    const std::int64_t last_line = line_count().value - 1;
-    const std::int64_t target_line = std::min<std::int64_t>(line.value + page_move_delta(visible_lines), last_line);
-    return clamp_cursor(ByteCursorPos{
-        .line = LineIndex{target_line},
-        .column = column,
-    });
-}
-
 ByteCursorPos TextBuffer::move_home(const ByteCursorPos cursor) const {
-    const auto [line, column] = clamp_cursor(cursor);
+    const LineIndex line = clamp_cursor(cursor).line;
     return ByteCursorPos{
         .line = line,
         .column = ByteColumn{},
@@ -176,7 +365,7 @@ ByteCursorPos TextBuffer::move_home(const ByteCursorPos cursor) const {
 }
 
 ByteCursorPos TextBuffer::move_end(const ByteCursorPos cursor) const {
-    const auto [line, column] = clamp_cursor(cursor);
+    const LineIndex line = clamp_cursor(cursor).line;
     return ByteCursorPos{
         .line = line,
         .column = line_length(line),

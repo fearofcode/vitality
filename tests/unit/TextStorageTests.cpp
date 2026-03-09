@@ -104,6 +104,22 @@ TEST_CASE("TextStorage clamp_cursor clamps line and column to valid bounds") {
     CHECK(clamped.column.value == 2);
 }
 
+TEST_CASE("TextStorage byte cursor helpers keep the current byte semantics explicit") {
+    const vitality::TextStorage storage = vitality::TextStorage::from_utf8("abcd\nxy");
+
+    const vitality::ByteColumn clamped_column = storage.clamp_line_byte_column(
+        vitality::LineIndex{1},
+        vitality::ByteColumn{99});
+    CHECK(clamped_column.value == 2);
+
+    const vitality::ByteCursorPos cursor = storage.clamp_cursor(vitality::ByteCursorPos{
+        .line = vitality::LineIndex{99},
+        .column = vitality::ByteColumn{99},
+    });
+    CHECK(cursor.line.value == 1);
+    CHECK(cursor.column.value == 2);
+}
+
 TEST_CASE("TextStorage load_from_stream preserves bytes exactly") {
     std::istringstream input("abc\r\nxyz");
     const vitality::TextStorage storage = vitality::TextStorage::load_from_stream(input);

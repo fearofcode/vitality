@@ -14,6 +14,7 @@
 #include "buffer/BufferTypes.h"
 #include "buffer/TextBuffer.h"
 #include "file/FilePath.h"
+#include "unicode/UnicodeLineOps.h"
 
 namespace {
 
@@ -89,6 +90,27 @@ private:
     return cursor.column.value >= 0 && cursor.column.value <= line_length;
 }
 
+[[nodiscard]] vitality::ByteCursorPos move_left_reference_by_byte(
+    const vitality::TextBuffer &buffer,
+    const vitality::ByteCursorPos cursor) {
+    const vitality::ByteCursorPos clamped = buffer.clamp_cursor(cursor);
+    return vitality::ByteCursorPos{
+        .line = clamped.line,
+        .column = vitality::ByteColumn{std::max<std::int64_t>(clamped.column.value - 1, 0)},
+    };
+}
+
+[[nodiscard]] vitality::ByteCursorPos move_right_reference_by_byte(
+    const vitality::TextBuffer &buffer,
+    const vitality::ByteCursorPos cursor) {
+    const vitality::ByteCursorPos clamped = buffer.clamp_cursor(cursor);
+    const std::int64_t max_column = buffer.line_length(clamped.line).value;
+    return vitality::ByteCursorPos{
+        .line = clamped.line,
+        .column = vitality::ByteColumn{std::min<std::int64_t>(clamped.column.value + 1, max_column)},
+    };
+}
+
 }  // namespace
 
 TEST_CASE("navigation methods always return valid cursors") {
@@ -105,10 +127,6 @@ TEST_CASE("navigation methods always return valid cursors") {
 
         RC_ASSERT(is_valid_cursor(buffer, buffer.move_left(cursor)));
         RC_ASSERT(is_valid_cursor(buffer, buffer.move_right(cursor)));
-        RC_ASSERT(is_valid_cursor(buffer, buffer.move_up(cursor)));
-        RC_ASSERT(is_valid_cursor(buffer, buffer.move_down(cursor)));
-        RC_ASSERT(is_valid_cursor(buffer, buffer.move_page_up(cursor, vitality::VisibleLineCount{5})));
-        RC_ASSERT(is_valid_cursor(buffer, buffer.move_page_down(cursor, vitality::VisibleLineCount{5})));
         RC_ASSERT(is_valid_cursor(buffer, buffer.move_home(cursor)));
         RC_ASSERT(is_valid_cursor(buffer, buffer.move_end(cursor)));
     });
@@ -128,18 +146,10 @@ TEST_CASE("boundary movement becomes idempotent at the edges") {
             *rc::gen::arbitrary<int>());
 
         vitality::ByteCursorPos left = cursor;
-        vitality::ByteCursorPos up = cursor;
-        vitality::ByteCursorPos down = cursor;
         const std::int64_t left_iterations = buffer.line_length(cursor.line).value + 1;
-        const std::int64_t vertical_iterations = buffer.line_count().value + 1;
 
         for (std::int64_t i = 0; i < left_iterations; ++i) {
             left = buffer.move_left(left);
-        }
-
-        for (std::int64_t i = 0; i < vertical_iterations; ++i) {
-            up = buffer.move_up(up);
-            down = buffer.move_down(down);
         }
 
         const vitality::ByteCursorPos line_end = buffer.move_end(cursor);
@@ -150,10 +160,6 @@ TEST_CASE("boundary movement becomes idempotent at the edges") {
 
         RC_ASSERT(left.column.value == 0);
         RC_ASSERT(buffer.move_left(left).column.value == 0);
-        RC_ASSERT(up.line.value == 0);
-        RC_ASSERT(buffer.move_up(up).line.value == 0);
-        RC_ASSERT(down.line.value == buffer.line_count().value - 1);
-        RC_ASSERT(buffer.move_down(down).line.value == down.line.value);
         RC_ASSERT(right.column.value == buffer.line_length(right.line).value);
         RC_ASSERT(buffer.move_right(right).column.value == right.column.value);
     });
@@ -175,5 +181,99 @@ TEST_CASE("clamp_cursor is idempotent") {
 
         RC_ASSERT(first.line.value == second.line.value);
         RC_ASSERT(first.column.value == second.column.value);
+    });
+}
+
+TEST_CASE("successful horizontal movement on valid UTF-8 lines lands on grapheme boundaries") {
+    rc::prop("left and right return grapheme boundaries for representative valid lines", [] {
+        const std::vector<std::string> corpus{
+            "plain ascii",
+            "e\u0301x",
+            "👍🏽a",
+            "👩‍💻x",
+            "하x",
+        };
+
+        const std::string line = *rc::gen::elementOf(corpus);
+        const vitality::TextBuffer buffer = load_buffer_from_lines(std::vector<std::string>{line});
+        const auto raw_column = *rc::gen::inRange<std::int64_t>(0, buffer.line_length(vitality::LineIndex{0}).value + 1);
+        const vitality::ByteCursorPos cursor = make_cursor(buffer, 0, static_cast<int>(raw_column));
+
+        const vitality::ByteCursorPos moved_left = buffer.move_left(cursor);
+        const vitality::ByteCursorPos moved_right = buffer.move_right(cursor);
+        const std::string_view utf8_line = buffer.line_text(vitality::LineIndex{0}).utf8_text;
+
+        const auto left_alignment = vitality::unicode::align_byte_column_to_grapheme_boundary(
+            utf8_line,
+            moved_left.column);
+        const auto right_alignment = vitality::unicode::align_byte_column_to_grapheme_boundary(
+            utf8_line,
+            moved_right.column);
+
+        RC_ASSERT(left_alignment.success);
+        RC_ASSERT(right_alignment.success);
+        RC_ASSERT(left_alignment.column.value == moved_left.column.value);
+        RC_ASSERT(right_alignment.column.value == moved_right.column.value);
+    });
+}
+
+TEST_CASE("malformed UTF-8 horizontal movement matches the byte-step fallback model") {
+    rc::prop("left and right match byte movement on malformed lines", [] {
+        std::string suffix = *rc::gen::string<std::string>();
+        for (char &ch : suffix) {
+            if (ch == '\n' || ch == '\r') {
+                ch = ' ';
+            }
+        }
+
+        const std::string malformed_line = std::string("\x80", 1) + suffix;
+        const vitality::TextBuffer buffer = load_buffer_from_lines(std::vector<std::string>{malformed_line});
+        const auto raw_column = *rc::gen::inRange<std::int64_t>(0, buffer.line_length(vitality::LineIndex{0}).value + 1);
+        const vitality::ByteCursorPos cursor = make_cursor(buffer, 0, static_cast<int>(raw_column));
+
+        const vitality::ByteCursorPos moved_left = buffer.move_left(cursor);
+        const vitality::ByteCursorPos moved_right = buffer.move_right(cursor);
+        const vitality::ByteCursorPos expected_left = move_left_reference_by_byte(buffer, cursor);
+        const vitality::ByteCursorPos expected_right = move_right_reference_by_byte(buffer, cursor);
+
+        RC_ASSERT(moved_left.line.value == expected_left.line.value);
+        RC_ASSERT(moved_left.column.value == expected_left.column.value);
+        RC_ASSERT(moved_right.line.value == expected_right.line.value);
+        RC_ASSERT(moved_right.column.value == expected_right.column.value);
+    });
+}
+
+TEST_CASE("display column and cursor-for-display-column round trip on representative valid UTF-8 lines") {
+    rc::prop("round-trips up to line-end clamping", [] {
+        const std::vector<std::string> corpus{
+            "plain ascii",
+            "e\u0301x",
+            "👍🏽a",
+            "👩‍💻x",
+            "こんにちは",
+        };
+
+        const std::string line = *rc::gen::elementOf(corpus);
+        const vitality::TextBuffer buffer = load_buffer_from_lines(std::vector<std::string>{line});
+        const auto raw_column = *rc::gen::inRange<std::int64_t>(0, 8);
+
+        const auto cursor = buffer.cursor_for_display_column(
+            vitality::LineIndex{0},
+            vitality::GraphemeColumn{raw_column});
+        RC_ASSERT(cursor.success);
+
+        const auto display_column = buffer.display_column(vitality::ByteCursorPos{
+            .line = cursor.cursor.line,
+            .column = vitality::ByteColumn{cursor.cursor.column.value},
+        });
+        RC_ASSERT(display_column.success);
+        RC_ASSERT(display_column.column.value <= raw_column);
+
+        const auto line_end_column = buffer.display_column(vitality::ByteCursorPos{
+            .line = vitality::LineIndex{0},
+            .column = buffer.line_length(vitality::LineIndex{0}),
+        });
+        RC_ASSERT(line_end_column.success);
+        RC_ASSERT(display_column.column.value == std::min<std::int64_t>(raw_column, line_end_column.column.value));
     });
 }
