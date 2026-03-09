@@ -31,9 +31,6 @@ public:
     [[nodiscard]] ByteColumn line_length(LineIndex line) const;
 
     [[nodiscard]] LogicalGraphemeCursorResult logical_grapheme_cursor(ByteCursorPos cursor) const;
-    [[nodiscard]] ByteColumnAlignmentResult align_line_byte_column_to_code_point_boundary(
-        LineIndex line,
-        ByteColumn column) const;
     [[nodiscard]] GraphemeBoundaryCursorResult align_cursor_to_grapheme_boundary(
         ByteCursorPos cursor) const;
     [[nodiscard]] GraphemeBoundaryCursorResult previous_grapheme_cursor(

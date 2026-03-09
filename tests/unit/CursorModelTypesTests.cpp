@@ -2,7 +2,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "buffer/TextBuffer.h"
 #include "core/CoreTypes.h"
 
 namespace {

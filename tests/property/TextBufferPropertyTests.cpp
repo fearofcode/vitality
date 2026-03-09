@@ -1,7 +1,4 @@
-#include <chrono>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,66 +10,10 @@
 
 #include "buffer/BufferTypes.h"
 #include "buffer/TextBuffer.h"
-#include "file/FilePath.h"
+#include "TestHelpers.h"
 #include "unicode/UnicodeLineOps.h"
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::vector<std::string> &lines)
-        : path_(std::filesystem::temp_directory_path() / make_name()) {
-        std::ofstream output(path_, std::ios::out | std::ios::trunc);
-        for (std::size_t index = 0; index < lines.size(); ++index) {
-            output << lines[index];
-            if (index + 1 < lines.size()) {
-                output << '\n';
-            }
-        }
-    }
-
-    ~TempFile() {
-        std::error_code error;
-        std::filesystem::remove(path_, error);
-    }
-
-    [[nodiscard]] const std::filesystem::path &path() const {
-        return path_;
-    }
-
-private:
-    [[nodiscard]] static std::string make_name() {
-        static int counter = 0;
-        const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
-        return "vitality-property-" + std::to_string(seed) + "-" + std::to_string(counter++) + ".txt";
-    }
-
-    std::filesystem::path path_;
-};
-
-[[nodiscard]] std::vector<std::string> sanitize_lines(std::vector<std::string> lines) {
-    for (std::string &line : lines) {
-        for (char &ch : line) {
-            if (ch == '\n' || ch == '\r') {
-                ch = ' ';
-            }
-        }
-    }
-
-    if (lines.empty()) {
-        lines.emplace_back();
-    }
-
-    return lines;
-}
-
-[[nodiscard]] vitality::TextBuffer load_buffer_from_lines(const std::vector<std::string> &lines) {
-    TempFile temp_file(lines);
-    const vitality::FilePath file_path = vitality::FilePath::from_command_line_arg(temp_file.path().c_str());
-    auto load_result = vitality::TextBuffer::load_from_path(file_path);
-    RC_ASSERT(load_result.success);
-    return std::move(load_result.buffer);
-}
 
 [[nodiscard]] vitality::ByteCursorPos make_cursor(const vitality::TextBuffer &buffer, const int line, const int column) {
     return buffer.clamp_cursor(vitality::ByteCursorPos{
@@ -118,9 +59,11 @@ TEST_CASE("navigation methods always return valid cursors") {
         auto raw_lines = *rc::gen::container<std::vector<std::string>>(
             *rc::gen::inRange<std::size_t>(1, static_cast<std::size_t>(8)),
             rc::gen::string<std::string>());
-        raw_lines = sanitize_lines(std::move(raw_lines));
+        raw_lines = vitality::tests::sanitize_lines_for_buffer(std::move(raw_lines));
 
-        const vitality::TextBuffer buffer = load_buffer_from_lines(raw_lines);
+        auto load_result = vitality::tests::load_buffer_result_from_lines(raw_lines);
+        RC_ASSERT(load_result.success);
+        const vitality::TextBuffer buffer = std::move(load_result.buffer);
         const int raw_line = *rc::gen::arbitrary<int>();
         const int raw_column = *rc::gen::arbitrary<int>();
         const vitality::ByteCursorPos cursor = make_cursor(buffer, raw_line, raw_column);
@@ -137,9 +80,11 @@ TEST_CASE("boundary movement becomes idempotent at the edges") {
         auto raw_lines = *rc::gen::container<std::vector<std::string>>(
             *rc::gen::inRange<std::size_t>(1, static_cast<std::size_t>(8)),
             rc::gen::string<std::string>());
-        raw_lines = sanitize_lines(std::move(raw_lines));
+        raw_lines = vitality::tests::sanitize_lines_for_buffer(std::move(raw_lines));
 
-        const vitality::TextBuffer buffer = load_buffer_from_lines(raw_lines);
+        auto load_result = vitality::tests::load_buffer_result_from_lines(raw_lines);
+        RC_ASSERT(load_result.success);
+        const vitality::TextBuffer buffer = std::move(load_result.buffer);
         const vitality::ByteCursorPos cursor = make_cursor(
             buffer,
             *rc::gen::arbitrary<int>(),
@@ -170,9 +115,11 @@ TEST_CASE("clamp_cursor is idempotent") {
         auto raw_lines = *rc::gen::container<std::vector<std::string>>(
             *rc::gen::inRange<std::size_t>(1, static_cast<std::size_t>(8)),
             rc::gen::string<std::string>());
-        raw_lines = sanitize_lines(std::move(raw_lines));
+        raw_lines = vitality::tests::sanitize_lines_for_buffer(std::move(raw_lines));
 
-        const vitality::TextBuffer buffer = load_buffer_from_lines(raw_lines);
+        auto load_result = vitality::tests::load_buffer_result_from_lines(raw_lines);
+        RC_ASSERT(load_result.success);
+        const vitality::TextBuffer buffer = std::move(load_result.buffer);
         const vitality::ByteCursorPos first = buffer.clamp_cursor(vitality::ByteCursorPos{
             .line = vitality::LineIndex{*rc::gen::arbitrary<int>()},
             .column = vitality::ByteColumn{*rc::gen::arbitrary<int>()},
@@ -195,7 +142,9 @@ TEST_CASE("successful horizontal movement on valid UTF-8 lines lands on grapheme
         };
 
         const std::string line = *rc::gen::elementOf(corpus);
-        const vitality::TextBuffer buffer = load_buffer_from_lines(std::vector<std::string>{line});
+        auto load_result = vitality::tests::load_buffer_result_from_lines(std::vector<std::string>{line});
+        RC_ASSERT(load_result.success);
+        const vitality::TextBuffer buffer = std::move(load_result.buffer);
         const auto raw_column = *rc::gen::inRange<std::int64_t>(0, buffer.line_length(vitality::LineIndex{0}).value + 1);
         const vitality::ByteCursorPos cursor = make_cursor(buffer, 0, static_cast<int>(raw_column));
 
@@ -227,7 +176,9 @@ TEST_CASE("malformed UTF-8 horizontal movement matches the byte-step fallback mo
         }
 
         const std::string malformed_line = std::string("\x80", 1) + suffix;
-        const vitality::TextBuffer buffer = load_buffer_from_lines(std::vector<std::string>{malformed_line});
+        auto load_result = vitality::tests::load_buffer_result_from_lines(std::vector<std::string>{malformed_line});
+        RC_ASSERT(load_result.success);
+        const vitality::TextBuffer buffer = std::move(load_result.buffer);
         const auto raw_column = *rc::gen::inRange<std::int64_t>(0, buffer.line_length(vitality::LineIndex{0}).value + 1);
         const vitality::ByteCursorPos cursor = make_cursor(buffer, 0, static_cast<int>(raw_column));
 
@@ -254,7 +205,9 @@ TEST_CASE("display column and cursor-for-display-column round trip on representa
         };
 
         const std::string line = *rc::gen::elementOf(corpus);
-        const vitality::TextBuffer buffer = load_buffer_from_lines(std::vector<std::string>{line});
+        auto load_result = vitality::tests::load_buffer_result_from_lines(std::vector<std::string>{line});
+        RC_ASSERT(load_result.success);
+        const vitality::TextBuffer buffer = std::move(load_result.buffer);
         const auto raw_column = *rc::gen::inRange<std::int64_t>(0, 8);
 
         const auto cursor = buffer.cursor_for_display_column(

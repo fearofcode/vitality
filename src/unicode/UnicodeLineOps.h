@@ -26,28 +26,6 @@ namespace vitality::unicode {
 // Unicode-sensitive logic honest and prevents unrelated layers from smuggling
 // ad hoc UTF-8 heuristics into the rest of the codebase.
 
-// align_byte_column_to_code_point_boundary takes an arbitrary line-relative
-// byte column and moves it backward, if necessary, to the start of the
-// containing UTF-8 code point.
-//
-// This is weaker than grapheme alignment. A grapheme cluster may span multiple
-// code points, so a returned ByteColumn is only guaranteed to be safe for
-// decoding and further Unicode analysis, not safe as a full user-visible
-// cursor stop by itself.
-//
-// The function exists because many editor operations begin with a stored byte
-// cursor that may have come from older byte-based behavior, malformed input, or
-// a conservative fallback path. Before the code can ask richer questions such
-// as "what grapheme is this inside?" it first needs a valid code-point
-// boundary.
-//
-// If the line is malformed UTF-8 in a way that prevents trustworthy boundary
-// analysis, the result reports failure instead of pretending the input was
-// valid.
-[[nodiscard]] ByteColumnAlignmentResult align_byte_column_to_code_point_boundary(
-    std::string_view utf8_line,
-    ByteColumn column);
-
 // align_byte_column_to_grapheme_boundary takes an arbitrary line-relative byte
 // column and returns the grapheme boundary at or before that position.
 //

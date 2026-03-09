@@ -5,33 +5,6 @@
 
 #include "unicode/UnicodeLineOps.h"
 
-TEST_CASE("UnicodeLineOps aligns byte columns to code point boundaries") {
-    const auto ascii = vitality::unicode::align_byte_column_to_code_point_boundary(
-        "hello",
-        vitality::ByteColumn{3});
-    REQUIRE(ascii.success);
-    CHECK(ascii.aligned_column.value == 3);
-
-    const auto multibyte = vitality::unicode::align_byte_column_to_code_point_boundary(
-        "éx",
-        vitality::ByteColumn{1});
-    REQUIRE(multibyte.success);
-    CHECK(multibyte.aligned_column.value == 0);
-
-    const auto out_of_range = vitality::unicode::align_byte_column_to_code_point_boundary(
-        "éx",
-        vitality::ByteColumn{99});
-    REQUIRE(out_of_range.success);
-    CHECK(out_of_range.aligned_column.value == 3);
-
-    const std::string malformed("\x80x", 2);
-    const auto invalid = vitality::unicode::align_byte_column_to_code_point_boundary(
-        malformed,
-        vitality::ByteColumn{1});
-    CHECK(!invalid.success);
-    CHECK(invalid.error == vitality::UnicodeError::InvalidUtf8);
-}
-
 TEST_CASE("UnicodeLineOps aligns byte columns to grapheme boundaries") {
     const auto ascii = vitality::unicode::align_byte_column_to_grapheme_boundary(
         "hello",

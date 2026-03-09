@@ -1,7 +1,4 @@
-#include <chrono>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
@@ -11,38 +8,11 @@
 
 #include "buffer/BufferTypes.h"
 #include "buffer/TextBuffer.h"
-#include "file/FilePath.h"
+#include "TestHelpers.h"
 #include "ui/StatusBarText.h"
 #include "ui/EditorScrollArea.h"
 
 namespace {
-
-class TempFile {
-public:
-    explicit TempFile(const std::string &contents)
-        : path_(std::filesystem::temp_directory_path() / make_name()) {
-        std::ofstream output(path_, std::ios::out | std::ios::trunc);
-        output << contents;
-    }
-
-    ~TempFile() {
-        std::error_code error;
-        std::filesystem::remove(path_, error);
-    }
-
-    [[nodiscard]] const std::filesystem::path &path() const {
-        return path_;
-    }
-
-private:
-    [[nodiscard]] static std::string make_name() {
-        static int counter = 0;
-        const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
-        return "vitality-editor-" + std::to_string(seed) + "-" + std::to_string(counter++) + ".txt";
-    }
-
-    std::filesystem::path path_;
-};
 
 [[nodiscard]] QApplication &test_application() {
     static int argc = 1;
@@ -50,14 +20,6 @@ private:
     static char *argv[] = {app_name, nullptr};
     static QApplication app(argc, argv);
     return app;
-}
-
-[[nodiscard]] vitality::TextBuffer load_buffer_from_contents(const std::string &contents) {
-    TempFile temp_file(contents);
-    const vitality::FilePath file_path = vitality::FilePath::from_command_line_arg(temp_file.path().c_str());
-    auto load_result = vitality::TextBuffer::load_from_path(file_path);
-    REQUIRE(load_result.success);
-    return std::move(load_result.buffer);
 }
 
 void send_key(vitality::EditorScrollArea &editor, const int key) {
@@ -69,7 +31,7 @@ void send_key(vitality::EditorScrollArea &editor, const int key) {
 
 TEST_CASE("vertical movement preserves preferred column across shorter lines") {
     (void)test_application();
-    vitality::EditorScrollArea editor(load_buffer_from_contents("abcdef\nx\nabcdef\n"));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require("abcdef\nx\nabcdef\n"));
     editor.resize(400, 160);
 
     send_key(editor, Qt::Key_Right);
@@ -95,7 +57,7 @@ TEST_CASE("vertical movement preserves preferred column across shorter lines") {
 
 TEST_CASE("horizontal movement resets preferred column state") {
     (void)test_application();
-    vitality::EditorScrollArea editor(load_buffer_from_contents("abcdef\nx\nabcdef\n"));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require("abcdef\nx\nabcdef\n"));
     editor.resize(400, 160);
 
     send_key(editor, Qt::Key_Right);
@@ -119,7 +81,7 @@ TEST_CASE("horizontal movement resets preferred column state") {
 
 TEST_CASE("page movement preserves preferred column") {
     (void)test_application();
-    vitality::EditorScrollArea editor(load_buffer_from_contents("abcdef\nx\nabcdef\nabcdef\n"));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require("abcdef\nx\nabcdef\nabcdef\n"));
     editor.resize(400, 80);
 
     send_key(editor, Qt::Key_Right);
@@ -138,7 +100,7 @@ TEST_CASE("page movement preserves preferred column") {
 
 TEST_CASE("vertical movement derives preferred column from containing grapheme cluster") {
     (void)test_application();
-    vitality::EditorScrollArea editor(load_buffer_from_contents("e\u0301x\nabcdef\n"));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require("e\u0301x\nabcdef\n"));
     editor.resize(400, 160);
 
     editor.set_cursor_for_tests(vitality::ByteCursorPos{
@@ -157,7 +119,7 @@ TEST_CASE("vertical movement derives preferred column from containing grapheme c
 TEST_CASE("mixed Arabic comment line uses visual Left and Right in the editor path") {
     (void)test_application();
     constexpr std::string_view line = "// السلام\n";
-    vitality::EditorScrollArea editor(load_buffer_from_contents(std::string(line)));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require(std::string(line)));
     editor.resize(400, 160);
 
     send_key(editor, Qt::Key_Right);
@@ -177,8 +139,8 @@ TEST_CASE("mixed Arabic comment line uses visual Left and Right in the editor pa
 TEST_CASE("Home and End use visual line edges on mixed Arabic comment lines") {
     (void)test_application();
     constexpr std::string_view line = "// السلام\n";
-    const vitality::TextBuffer buffer = load_buffer_from_contents(std::string(line));
-    vitality::EditorScrollArea editor(load_buffer_from_contents(std::string(line)));
+    const vitality::TextBuffer buffer = vitality::tests::load_buffer_from_contents_or_require(std::string(line));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require(std::string(line)));
     editor.resize(400, 160);
 
     editor.set_cursor_for_tests(vitality::ByteCursorPos{
@@ -197,8 +159,8 @@ TEST_CASE("Home and End use visual line edges on mixed Arabic comment lines") {
 TEST_CASE("status bar column stays logical after visual bidi movement") {
     (void)test_application();
     constexpr std::string_view line = "// السلام\n";
-    const vitality::TextBuffer buffer = load_buffer_from_contents(std::string(line));
-    vitality::EditorScrollArea editor(load_buffer_from_contents(std::string(line)));
+    const vitality::TextBuffer buffer = vitality::tests::load_buffer_from_contents_or_require(std::string(line));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require(std::string(line)));
     editor.resize(400, 160);
 
     send_key(editor, Qt::Key_Right);
@@ -217,8 +179,8 @@ TEST_CASE("vertical movement from a visual bidi stop follows visual x rather tha
     constexpr std::string_view contents =
         "// 👩‍💻 zero width joiners I guess?\n"
         "// السلام عليكم\n";
-    const vitality::TextBuffer buffer = load_buffer_from_contents(std::string(contents));
-    vitality::EditorScrollArea editor(load_buffer_from_contents(std::string(contents)));
+    const vitality::TextBuffer buffer = vitality::tests::load_buffer_from_contents_or_require(std::string(contents));
+    vitality::EditorScrollArea editor(vitality::tests::load_buffer_from_contents_or_require(std::string(contents)));
     editor.resize(900, 160);
 
     const vitality::ByteCursorPos starting_cursor{

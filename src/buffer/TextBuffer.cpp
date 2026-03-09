@@ -27,10 +27,6 @@ struct TextBuffer::Impl {
 
 namespace {
 
-[[nodiscard]] std::int64_t page_move_delta(const VisibleLineCount visible_lines) {
-    return std::max<std::int64_t>(visible_lines.value - 1, 1);
-}
-
 [[nodiscard]] ByteCursorPos move_left_by_byte(const TextBuffer &buffer, const ByteCursorPos cursor) {
     const auto [line, column] = buffer.clamp_cursor(cursor);
     return ByteCursorPos{
@@ -143,20 +139,6 @@ LogicalGraphemeCursorResult TextBuffer::logical_grapheme_cursor(const ByteCursor
         .success = true,
         .error = UnicodeError::None,
     };
-}
-
-ByteColumnAlignmentResult TextBuffer::align_line_byte_column_to_code_point_boundary(
-    const LineIndex line,
-    const ByteColumn column) const {
-    if (line.value < 0 || line.value >= line_count().value) {
-        return ByteColumnAlignmentResult{
-            .aligned_column = ByteColumn{},
-            .success = false,
-            .error = UnicodeError::None,
-        };
-    }
-
-    return unicode::align_byte_column_to_code_point_boundary(line_text(line).utf8_text, column);
 }
 
 GraphemeBoundaryCursorResult TextBuffer::align_cursor_to_grapheme_boundary(const ByteCursorPos cursor) const {

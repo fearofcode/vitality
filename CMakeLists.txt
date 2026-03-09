@@ -358,12 +358,14 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(Catch2 rapidcheck)
 
     add_executable(vitality_tests
+        tests/property/EditorNavigationModelPropertyTests.cpp
         tests/property/TextStorageEditPropertyTests.cpp
         tests/property/TextStoragePropertyTests.cpp
         tests/property/TextBufferPropertyTests.cpp
         tests/unit/ImplicitTreapStorageCoreTests.cpp
         tests/unit/TextStorageTests.cpp
         tests/unit/TextBufferTests.cpp
+        tests/unit/EditorNavigationModelTests.cpp
         tests/unit/EditorScrollAreaTests.cpp
         tests/unit/StatusBarTextTests.cpp
         tests/unit/CursorModelTypesTests.cpp
@@ -376,6 +378,7 @@ if(BUILD_TESTING)
     target_include_directories(vitality_tests
         PRIVATE
             ${PROJECT_SOURCE_DIR}/src
+            ${PROJECT_SOURCE_DIR}/tests
             ${rapidcheck_SOURCE_DIR}/extras/catch/include
     )
     target_link_libraries(vitality_tests

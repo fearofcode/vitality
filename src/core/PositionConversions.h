@@ -20,15 +20,6 @@ enum class UnicodeError : std::uint8_t {
     DependencyFailure,
 };
 
-// ByteColumnAlignmentResult reports the result of "take an arbitrary byte
-// column and align it to a valid code-point boundary." The aligned result is
-// still only a ByteColumn; it does not promise grapheme alignment.
-struct ByteColumnAlignmentResult {
-    ByteColumn aligned_column;
-    bool success = false;
-    UnicodeError error = UnicodeError::None;
-};
-
 // ByteToQtColumnResult describes one explicit boundary crossing:
 // - input/editor side: UTF-8 byte column in one logical line
 // - output/UI side: Qt UTF-16 code-unit column in that same line
